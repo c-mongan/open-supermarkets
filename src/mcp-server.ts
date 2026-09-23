@@ -52,6 +52,7 @@ const SESSION_PATHS: Record<string, string> = {
   sainsburys: `${os.homedir()}/.sainsburys/session.json`,
   ocado: `${os.homedir()}/.ocado/session.json`,
   tesco: `${os.homedir()}/.tesco/session.json`,
+  'tesco-hu': `${os.homedir()}/.tesco-hu/session.json`,
 };
 
 export function sessionPath(providerId: string): string | undefined {
@@ -183,7 +184,7 @@ export function toolDefinitions(): any[] {
       // ── Authentication ──
       {
         name: 'grocery_login',
-        description: 'Login to a UK supermarket account. Required before using other tools for that provider. Launches a browser for authentication.',
+        description: 'Login to a supermarket account (sainsburys, ocado, tesco). Launches a browser for authentication. tesco-hu has no scripted login: import a browser session with the CLI instead.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -595,7 +596,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_search ──
     if (name === 'grocery_search') {
-      if (loginError) return textResult(loginError, true);
+      if (loginError && providerName !== 'tesco-hu') return textResult(loginError, true);
       const { query, limit = 10, store_id } = args as {
         query: string;
         limit?: number;
@@ -738,11 +739,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       const formatted = basket.items.map((item, i) =>
-        `${i + 1}. ${item.quantity}x ${item.name}\n   ${money(item.unit_price)} each = ${money(item.total_price)} | ID: ${item.product_uid}`
+        `${i + 1}. ${item.quantity}x ${item.name}\n   ${money(item.unit_price, basket.currency)} each = ${money(item.total_price, basket.currency)} | ID: ${item.product_uid}`
       ).join('\n\n');
 
       return textResult(
-        `${providerName.toUpperCase()} Basket - ${money(basket.total_cost)} (${basket.items.length} items):\n\n${formatted}`
+        `${providerName.toUpperCase()} Basket - ${money(basket.total_cost, basket.currency)} (${basket.items.length} items):\n\n${formatted}`
       );
     }
 

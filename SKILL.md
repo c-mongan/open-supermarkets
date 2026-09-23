@@ -1,13 +1,13 @@
 ---
 name: open-supermarkets
-description: "Grocery automation across 15 providers in seven served countries: the UK, Ireland, the Netherlands, Belgium, Spain, the US and Canada. Search, compare, store-scope, basket, delivery and checkout capabilities vary by provider. Available as a CLI, MCP server or agent skill."
+description: "Grocery automation across 16 provider IDs in eight countries — UK, Ireland, Netherlands, Belgium, Spain, Hungary, the US and Canada. Capabilities vary by provider. Available as CLI, MCP server, or agent skill."
 license: MIT
 compatibility: Node.js 18+, TypeScript. Playwright is used by browser-auth providers. Delivery areas and capabilities vary by provider.
 metadata:
   author: zish
   version: "3.0.0"
   repository: https://github.com/abracadabra50/open-supermarkets
-  tags: [groceries, supermarket, sainsburys, ocado, tesco, albert-heijn, mercadona, kroger, instacart, uk, ireland, netherlands, belgium, spain, usa, canada, shopping, automation, mcp, agent-tool]
+  tags: [groceries, supermarket, sainsburys, ocado, tesco, tesco-hu, hungary, ireland, albert-heijn, mercadona, kroger, instacart, uk, netherlands, belgium, spain, usa, canada, shopping, automation, mcp, agent-tool]
 allowed-tools: Bash({baseDir}/node:*), Bash(supermarket:*), Bash(npm:run:supermarket:*)
 ---
 
@@ -20,7 +20,7 @@ search and supported shopping actions across multiple countries.
 
 ## Provider registry
 
-The registry currently contains 15 provider IDs across seven served countries:
+The registry currently contains 16 provider IDs across eight served countries:
 
 | Country | Provider IDs |
 |---------|--------------|
@@ -29,11 +29,19 @@ The registry currently contains 15 provider IDs across seven served countries:
 | NL | `ah` |
 | BE | `ah-be` |
 | ES | `mercadona` |
+| HU | `tesco-hu` |
 | US | `kroger`, `instacart`, `instacart-web` |
 | CA | served by the two Instacart providers (`instacart`, `instacart-web`) |
 
-Provider IDs and provider enums come from `src/providers/registry.ts`. Use the
-registry-backed command to see current countries and declared capabilities:
+| Supermarket | Skill File | Status |
+|-------------|-----------|--------|
+| **Sainsbury's** | [`skills/sainsburys.md`](skills/sainsburys.md) | Full coverage |
+| **Tesco** | [`skills/tesco.md`](skills/tesco.md) | Full coverage + staples |
+| **Ocado** | [`skills/ocado.md`](skills/ocado.md) | Full coverage except slot booking/checkout (AWS WAF) |
+| **Tesco Magyarország** | [`skills/tesco-hu.md`](skills/tesco-hu.md) | Search and basket; no slots/checkout |
+
+Provider IDs and capabilities come from `src/providers/registry.ts`. Check the
+current registry with:
 
 ```bash
 supermarket providers
@@ -54,6 +62,7 @@ Only these providers have dedicated per-provider skill files:
 | Sainsbury's | [`skills/sainsburys.md`](skills/sainsburys.md) |
 | Tesco | [`skills/tesco.md`](skills/tesco.md) |
 | Ocado | [`skills/ocado.md`](skills/ocado.md) |
+| Tesco Magyarország | [`skills/tesco-hu.md`](skills/tesco-hu.md) |
 
 The provider registry is the source for the complete provider list and
 capability matrix. Do not infer a provider-specific skill file from a provider

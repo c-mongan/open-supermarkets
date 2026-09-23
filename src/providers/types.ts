@@ -41,6 +41,8 @@ export interface Basket {
   total_quantity: number;
   total_cost: number;
   provider: string;
+  /** ISO 4217. Absent means GBP, like Product.currency. Non-UK providers must set it. */
+  currency?: string;
 }
 
 export interface DeliverySlot {

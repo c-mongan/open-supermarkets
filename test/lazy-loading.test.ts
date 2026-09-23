@@ -15,7 +15,7 @@
 import assert from 'node:assert';
 
 const PROVIDER_MODULE =
-  /providers[/\\](?:sainsburys|ocado|ah|instacart)(?:[/\\]|\.|$)|providers[/\\]tesco(?:[/\\]|\.|$)|providers[/\\](?:aldi|dunnes|lidl|mrprice|supervalu|tesco)-ie(?:[/\\]|\.|$)|providers[/\\]ie[/\\]shared(?:[/\\]|\.|$)/;
+  /providers[/\\](?:sainsburys|ocado|ah|instacart)(?:[/\\]|\.|$)|providers[/\\]tesco(?:[/\\]|\.|$)|providers[/\\]tesco-hu(?:[/\\]|\.|$)|providers[/\\](?:aldi|dunnes|lidl|mrprice|supervalu|tesco)-ie(?:[/\\]|\.|$)|providers[/\\]ie[/\\]shared(?:[/\\]|\.|$)/;
 const IRELAND_PROVIDER_IDS = [
   'aldi-ie',
   'dunnes-ie',
@@ -84,6 +84,8 @@ check('country filter excludes other countries', () => {
   assert.deepStrictEqual(nl, ['ah']);
   const ie = registry.list({ country: 'IE' }).map((p: any) => p.id).sort();
   assert.deepStrictEqual(ie, IRELAND_PROVIDER_IDS);
+  const hu = registry.list({ country: 'HU' }).map((p: any) => p.id);
+  assert.deepStrictEqual(hu, ['tesco-hu']);
   assert.deepStrictEqual(loadedProviderModules(), []);
 });
 
