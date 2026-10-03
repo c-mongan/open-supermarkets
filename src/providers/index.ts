@@ -34,8 +34,6 @@ export class ProviderFactory {
         return new (require('./ah').AlbertHeijnProvider)();
       case 'ah-be':
         return new (require('./ah').AlbertHeijnBEProvider)();
-      case 'supervalu-ie':
-        return new (require('./supervalu-ie').SuperValuIrelandProvider)();
       case 'mercadona':
         return new (require('./mercadona').MercadonaProvider)();
       case 'ahorramas':

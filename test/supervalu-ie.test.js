@@ -421,7 +421,7 @@ test('supervalu: failed selection preserves the previous store', async () => {
   assert.equal(new URL(calls[2].url).pathname, '/api/stores/5550/search');
 });
 
-test('supervalu: registry and legacy factory declare only tested capabilities', async () => {
+test('supervalu: async registry declares only tested capabilities', async () => {
   const {getManifest, createProvider} = require('../src/providers/registry.ts');
   const {ProviderFactory} = require('../src/providers/index.ts');
   const manifest = getManifest('supervalu-ie');
@@ -429,8 +429,12 @@ test('supervalu: registry and legacy factory declare only tested capabilities', 
   assert.equal(manifest.country, 'IE');
   assert.equal(manifest.auth, 'none');
   assert.equal(manifest.maintainer, 'c-mongan');
-  assert.equal((await createProvider('supervalu-ie')).name, 'supervalu-ie');
-  assert.equal(ProviderFactory.create('supervalu-ie').name, 'supervalu-ie');
+  const provider = await createProvider('supervalu-ie');
+  assert.equal(provider.name, 'supervalu-ie');
+  assert.equal(typeof provider.listStores, 'function');
+  assert.equal(typeof provider.selectStore, 'function');
+  assert.equal(provider.getBasket, undefined);
+  assert.throws(() => ProviderFactory.create('supervalu-ie'), /no synchronous constructor/);
 });
 
 test('supervalu: exact store filter applies before limit', async () => {
