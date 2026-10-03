@@ -19,6 +19,7 @@ import { batchSearch } from '../src/batch';
 import {
   StoreRoutingError,
   clientErrorStatus,
+  listProviderStores,
   parseStoreSearchOptions,
   prepareStoreId,
   selectStoreForSearch,
@@ -110,6 +111,14 @@ async function helpers(): Promise<void> {
     assert.equal(clientErrorStatus(Object.assign(new Error('spoofed'), { name: 'ProviderInputError' })), undefined);
     assert.equal(clientErrorStatus(new StoreRoutingError('unsupported', 'x')), 501);
     assert.equal(clientErrorStatus(new Error('boom')), undefined);
+  });
+
+  await test('store responses honor the requested limit and hard cap even when a provider ignores them', async () => {
+    const provider = await createProvider('fake-stores');
+    provider.listStores = async () => Array.from({ length: 150 }, (_, i) => ({ store_id: String(i), name: `Store ${i}` }));
+    assert.equal((await listProviderStores('fake-stores', provider, { limit: 2 })).length, 2);
+    assert.equal((await listProviderStores('fake-stores', provider, { limit: 500 })).length, 100);
+    assert.equal((await listProviderStores('fake-stores', provider, {})).length, 100);
   });
 
   await test('a provider that declares stores but lacks selectStore is unsupported, not a crash', async () => {
@@ -416,7 +425,7 @@ async function mcpRoutes(): Promise<void> {
         assert.match(r.text, /query must be a non-empty string/);
       }
       for (const queries of [null, [], ['milk', ' '], [null], [{ query: 5 }],
-        ...[-1, 0, 1.5, null, '3'].map((limit) => [{ query: 'milk', limit }]),
+        ...[-1, 0, 1.5, null, '3', 9007199254740992].map((limit) => [{ query: 'milk', limit }]),
         ...['storeId', 'store_id'].flatMap((key) => ['s2', null, ''].map((id) => [{ query: 'milk', [key]: id }]))]) {
         const r = await call('grocery_search_batch', { provider: 'fake-stores', store_id: 's1', queries });
         assert.equal(r.isError, true, r.text);
@@ -573,7 +582,7 @@ async function cliRoutes(): Promise<void> {
       ...['storeId', 'store_id'].flatMap((key) => ['s2', null, ''].map((id) => [
         ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', [key]: id }]),
       ])),
-      ...[-1, 0, 1.5, null, '3'].map((limit) => [
+      ...[-1, 0, 1.5, null, '3', 9007199254740992].map((limit) => [
         ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', limit }]),
       ]),
     ] as Array<[string[], string | undefined]>) {
