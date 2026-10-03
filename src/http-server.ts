@@ -97,7 +97,7 @@ export async function handleRequest(req: http.IncomingMessage, res: http.ServerR
       provider: url.searchParams.get('provider') || defaultProvider,
       endpoints: [
         '/search?q=&store_id=',
-        '/stores?query=&postcode=&latitude=&longitude=&range=&mode=&limit=',
+        '/stores?query=&postcode=&latitude=&longitude=&range=&mode=&limit=&store_id=',
         '/add?id=&qty=',
         '/remove?id=',
         '/update?id=&qty=',

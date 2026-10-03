@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ProviderFactory } from '../src/providers';
-import { TescoHuProvider } from '../src/providers/tesco-hu';
-import { LidlIrelandProvider } from '../src/providers/lidl-ie';
+import { ProviderFactory, getManifest } from '../src/providers';
+import type { SearchOptions } from '../src/providers/types';
+import http = require('node:http');
+import https = require('node:https');
 import fs = require('fs');
 
 async function main() {
@@ -15,8 +16,12 @@ async function main() {
   };
   const originalCreate = ProviderFactory.create;
   const originalConnect = Server.prototype.connect;
-  const originalHuSearch = TescoHuProvider.prototype.search;
-  const originalLidlSearch = LidlIrelandProvider.prototype.search;
+  const huManifest = getManifest('tesco-hu');
+  const lidlManifest = getManifest('lidl-ie');
+  const originalHuLoad = huManifest.load;
+  const originalLidlLoad = lidlManifest.load;
+  const originalHttpRequest = http.request;
+  const originalHttpsRequest = https.request;
   const originalReadFile = fs.readFileSync;
   const originalFetch = globalThis.fetch;
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -29,8 +34,17 @@ async function main() {
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/session.json') ? false : checkedExists(path)) as typeof fs.existsSync;
     ProviderFactory.create = (() => { throw new Error('Unexpected legacy constructor'); }) as typeof ProviderFactory.create;
     globalThis.fetch = async () => { throw new Error('Unexpected retailer request'); };
-    TescoHuProvider.prototype.search = async (_query, options) => { searchCalls++; lastLimit = options?.limit; return []; };
-    LidlIrelandProvider.prototype.search = async () => { searchCalls++; return []; };
+    // Registry loader fakes cover both CJS and dynamic ESM loading on all Node versions.
+    huManifest.load = async () => class {
+      readonly name = 'tesco-hu';
+      async search(_query: string, options?: SearchOptions) { searchCalls++; lastLimit = options?.limit; return []; }
+    };
+    lidlManifest.load = async () => class {
+      readonly name = 'lidl-ie';
+      async search() { searchCalls++; return []; }
+    };
+    http.request = (() => { throw new Error('Unexpected HTTP request'); }) as typeof http.request;
+    https.request = (() => { throw new Error('Unexpected HTTPS request'); }) as typeof https.request;
     Server.prototype.connect = function () {
       server = this;
       connection = originalConnect.call(this, serverTransport);
@@ -105,7 +119,7 @@ async function main() {
     ProviderFactory.create = ((name: string) => {
       assert.equal(name, 'ocado');
       return { getRegulars: async () => { regularsCalls++; return []; } };
-    }) as typeof ProviderFactory.create;
+    }) as unknown as typeof ProviderFactory.create;
     const regulars = await client.callTool({ name: 'ocado_regulars', arguments: {} });
     assert.notEqual(regulars.isError, true, JSON.stringify(regulars.content));
     const regularsExtraProvider = await client.callTool({ name: 'ocado_regulars', arguments: { provider: 'lidl-ie' } });
@@ -126,8 +140,10 @@ async function main() {
     fs.readFileSync = originalReadFile;
     ProviderFactory.create = originalCreate;
     Server.prototype.connect = originalConnect;
-    TescoHuProvider.prototype.search = originalHuSearch;
-    LidlIrelandProvider.prototype.search = originalLidlSearch;
+    huManifest.load = originalHuLoad;
+    lidlManifest.load = originalLidlLoad;
+    http.request = originalHttpRequest;
+    https.request = originalHttpsRequest;
     globalThis.fetch = originalFetch;
     await client.close();
     await server?.close();
