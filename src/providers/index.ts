@@ -30,8 +30,6 @@ export class ProviderFactory {
         return new (require('./ocado').OcadoProvider)();
       case 'tesco':
         return new (require('./tesco/index').TescoProvider)();
-      case 'mrprice-ie':
-        return new (require('./mrprice-ie').MrPriceIrelandProvider)();
       case 'ah':
         return new (require('./ah').AlbertHeijnProvider)();
       case 'ah-be':

@@ -379,6 +379,17 @@ test('mrprice: preserves failed HTML status without reading broken body', async 
   assert.equal(bodyRead,false);
 });
 
+
+test('mrprice: async registry loads search-only provider without full-service factory cast', async () => {
+  const {createProvider}=require('../src/providers/registry');
+  const {ProviderFactory}=require('../src/providers');
+  const provider=await createProvider('mrprice-ie');
+  assert.equal(provider.name,'mrprice-ie');
+  assert.equal(typeof provider.search,'function');
+  assert.equal(provider.getBasket,undefined);
+  assert.throws(() => ProviderFactory.create('mrprice-ie'), /await createProvider/);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
