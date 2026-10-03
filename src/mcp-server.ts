@@ -436,12 +436,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (catalogueTool) prepareStoreId(providerName, (args as any).store_id);
     const storeTool = name === 'grocery_stores';
     if (storeTool) assertStoresSupported(providerName);
+    const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
-    if (!catalogueTool && !storeTool && !globalTool &&
+    if (!catalogueTool && !storeTool && !globalTool && !providerSpecificTool &&
         getManifest(providerName).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
       return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);
     }
-    if (!globalTool && name !== 'grocery_login' &&
+    if (!globalTool && !providerSpecificTool && name !== 'grocery_login' &&
         ((!catalogueTool && !storeTool) || !searchesAnonymously(providerName))) {
       // Registry integrations handle their configured credentials in their own
       // methods. Only legacy integrations use these four session files.
@@ -666,6 +667,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── ocado_regulars ──
     if (name === 'ocado_regulars') {
+      const ocadoLoginError = requireLogin('ocado');
+      if (ocadoLoginError) return textResult(ocadoLoginError, true);
       const provider: any = getProvider('ocado');
 
       if (typeof provider.getRegulars !== 'function') {
