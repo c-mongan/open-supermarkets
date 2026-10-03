@@ -702,6 +702,29 @@ test('tesco: authentication text cannot hide in a root projection-shaped message
   await rejects(()=>provider.search('milk'), /Unauthorized/);assert.equal(calls.length,1);
 });
 
+test('tesco: valid primary identity/name fields do not hide malformed alternates', async () => {
+  for(const changes of [{tpnc:42},{name:42}]) {
+    const node={...jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node,...changes};
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
+    await rejects(()=>provider.search('milk'), /invalid product identity|invalid product name/);
+  }
+});
+
+test('tesco: malformed unit-price values and measures cannot hide behind valid prices', async () => {
+  for(const changes of [{unitPrice:{price:'bad',measure:'kg'}},{unitPrice:{price:2,measure:42}},{unitPrice:'bad'}]) {
+    const node={...jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node,...changes};
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
+    await rejects(()=>provider.search('milk'), /invalid unit price|invalid unit measure/);
+  }
+});
+
+test('tesco: unit price and measure stay paired within one source', async () => {
+  const node=jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;
+  node.unitPrice={price:0.5};
+  const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
+  const [product]=await provider.search('milk');assert.deepEqual(product.unit_price,{price:1.18,measure:'litre'});
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

@@ -195,13 +195,12 @@ function promotionFrom(value: unknown): Record<string, unknown> | undefined {
 }
 
 function firstFieldString(label: string, ...values: unknown[]): string | undefined {
-  for (const value of values) {
-    if (value === undefined || value === null) continue;
+  const texts = values.filter(value => value !== undefined && value !== null).map(value => {
     const text = firstString(value);
     if (!text) throw new ProviderProtocolError('Tesco Ireland', `invalid ${label}: expected a non-empty string`);
     return text;
-  }
-  return undefined;
+  });
+  return texts[0];
 }
 
 function productPrice(node: Record<string, unknown>): number | undefined {
@@ -219,17 +218,25 @@ function productPrice(node: Record<string, unknown>): number | undefined {
 }
 
 function unitPrice(node: Record<string, unknown>): Product['unit_price'] | undefined {
-  const firstSeller = seller(node);
-  const sellerPrice = optionalRecord(firstSeller.price, 'seller price');
+  const sellerPrice = optionalRecord(seller(node).price, 'seller price');
   const directPrice = optionalRecord(node.price, 'direct price');
-  const directUnit = asRecord(node.unitPrice);
-  const price = firstNumber(directUnit.price, sellerPrice.unitPrice, directPrice.unitPrice);
-  const measure = firstString(
-    directUnit.measure,
-    sellerPrice.unitOfMeasure,
-    directPrice.unitOfMeasure
-  );
-  return price !== undefined && measure ? { price, measure } : undefined;
+  const directUnit = optionalRecord(node.unitPrice, 'unit price');
+  const candidates = [
+    [directUnit.price, directUnit.measure],
+    [sellerPrice.unitPrice, sellerPrice.unitOfMeasure],
+    [directPrice.unitPrice, directPrice.unitOfMeasure],
+  ].map(([value, unit]) => {
+    const price = value === undefined || value === null ? undefined : firstNumber(value);
+    if (value !== undefined && value !== null && price === undefined) {
+      throw new ProviderProtocolError('Tesco Ireland', 'invalid unit price');
+    }
+    const measure = firstFieldString('unit measure', unit);
+    return { price, measure };
+  });
+  // Keep price and measure from one upstream source; never combine €/kg with
+  // a different source's price or an invented unit.
+  const matched = candidates.find(candidate => candidate.price !== undefined && candidate.measure !== undefined);
+  return matched ? { price: matched.price!, measure: matched.measure! } : undefined;
 }
 
 function parsedStockState(value: unknown): boolean | null | undefined {
