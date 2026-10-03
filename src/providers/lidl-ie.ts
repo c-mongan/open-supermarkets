@@ -95,7 +95,8 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   if (conditional) {
     // The generic price can repeat the regional RRP without its marker.
     if (asRecord(currentPrice.discount).fromRecommendedPrice !== true) {
-      productPrice = firstPrice(regularOldPrice(currentPrice), regularOldPrice(price));
+      productPrice = Object.prototype.hasOwnProperty.call(currentPrice, 'oldPrice')
+        ? regularOldPrice(currentPrice) : regularOldPrice(price);
     }
   } else {
     productPrice = Object.prototype.hasOwnProperty.call(regionPrice, 'currentPrice')

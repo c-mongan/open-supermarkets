@@ -242,3 +242,38 @@ test('Lidl identifies timeouts during response-body reading', async (t) => {
   } });
   await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out/);
 });
+
+
+test('Lidl rejects malformed present regional old prices on conditional offers', async () => {
+  for (const oldPrice of ['bad', null, '', -1, {}, []]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'invalid-old-price', fullTitle: 'Milk', price: { price: 1.50, oldPrice: 2.79 },
+      regionsPrices: { '1': { currentPrice: {
+        price: 1.50, oldPrice, discount: { discountText: '2 for €3' },
+      } } },
+    } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});
+
+test('Lidl may use generic regular old price when regional old price is absent', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'missing-old-price', fullTitle: 'Milk', price: { price: 1.50, oldPrice: 2.79 },
+    regionsPrices: { '1': { currentPrice: {
+      price: 1.50, discount: { discountText: '2 for €3' },
+    } } },
+  } } }] };
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 2.79);
+});
+
+test('Lidl prefers a valid regional regular old price over the generic old price', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'regional-old-price', fullTitle: 'Milk', price: { price: 1.50, oldPrice: 3.99 },
+    regionsPrices: { '1': { currentPrice: {
+      price: 1.50, oldPrice: 2.79, discount: { discountText: '2 for €3' },
+    } } },
+  } } }] };
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 2.79);
+});
