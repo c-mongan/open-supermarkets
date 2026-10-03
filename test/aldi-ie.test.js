@@ -454,13 +454,24 @@ test('aldi: explicit foreign prices cannot be labelled EUR', async () => {
     {amountRelevant:'USD139'},
     {amountRelevantDisplay:'$1.39',amountRelevant:139},
     {amountRelevantDisplay:'1.39 USD',amountRelevant:139},
-    {currencyCode:'USD',amountRelevant:139}
+    {currencyCode:'USD',amountRelevant:139},
+    {amountRelevantDisplay:'CAD 1.39',amountRelevant:139},
+    {amountRelevantDisplay:'CHF1.39',amountRelevant:139},
+    {amountRelevantDisplay:'1.39 JPY',amountRelevant:139},
+    {amountRelevantDisplay:'¥1.39',amountRelevant:139},
+    {amountRelevantDisplay:'₹1.39',amountRelevant:139},
+    {amountRelevant:'CAD139'},
+    {currencyCode:'EUR',currency:'CAD',amountRelevant:139}
   ]) {
     const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'foreign',name:'Milk',price}]}])});
     await rejects(()=>p.search('milk'),/no valid products/);
   }
-  const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'euro',name:'Milk',price:{currencyCode:'EUR',amountRelevantDisplay:'€1.39'}}]}])});
-  assert.equal((await p.search('milk'))[0].currency,'EUR');
+  for (const amountRelevantDisplay of ['€1.39', 'EUR1.39', '1.39 EUR', '1.39']) {
+    const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'euro',name:'Milk',price:{currencyCode:'EUR',amountRelevantDisplay}}]}])});
+    const [product] = await p.search('milk');
+    assert.equal(product.currency,'EUR');
+    assert.equal(product.retail_price.price,1.39);
+  }
 });
 
 async function main() {
