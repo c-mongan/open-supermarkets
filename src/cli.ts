@@ -188,11 +188,14 @@ program
       }
 
       // Validate and capability-check the store before any provider code loads.
-      const { prepareStoreId, selectStoreForSearch } = await import('./stores');
+      const { prepareStoreId, selectStoreForSearch, requireSearchQuery, validateBatchSearchQueries } = await import('./stores');
       const storeId = prepareStoreId(providerId, globals.storeId);
-      const provider = await createProvider(providerId);
-      // One selection on this process-local instance, before any (batch) search.
-      if (storeId) await selectStoreForSearch(providerId, provider, storeId);
+      const createSearchProvider = async () => {
+        const provider = await createProvider(providerId);
+        // Select once, after caller input is valid and before any search.
+        if (storeId) await selectStoreForSearch(providerId, provider, storeId);
+        return provider;
+      };
       const scope = storeId ? { storeId } : {};
 
       // Batch mode: thirty queries in one invocation instead of thirty.
@@ -208,6 +211,8 @@ program
                 'utf-8'
               );
         const queries = parseBatchInput(raw);
+        validateBatchSearchQueries(queries);
+        const provider = await createSearchProvider();
         const results = await batchSearch(provider, queries, { limit, ...scope });
 
         if (options.json !== false) {
@@ -230,6 +235,8 @@ program
         return;
       }
 
+      requireSearchQuery(query);
+      const provider = await createSearchProvider();
       let products: any[] = await provider.search(query, { limit, ...scope });
 
       if (options.enrich) {

@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { ProviderFactory, ProviderName } from './providers';
-import { assertCapability, createProvider, getManifest } from './providers/registry';
+import { assertCapability, createProvider } from './providers/registry';
 import type { FullGroceryProvider, SearchOptions } from './providers/types';
 import {
   assertStoresSupported,
@@ -11,6 +11,7 @@ import {
   listProviderStores,
   parseStoreSearchOptions,
   prepareStoreId,
+  requireSearchQuery,
   selectStoreForSearch,
 } from './stores';
 
@@ -108,7 +109,7 @@ export async function handleRequest(req: http.IncomingMessage, res: http.ServerR
   }
 
   if (url.pathname === '/search') {
-    const q = requireQuery(url, 'q');
+    const q = requireSearchQuery(requireQuery(url, 'q'));
     const limit = parsePositiveInt(url.searchParams.get('limit'), 'limit', 24);
     const providerId = providerIdFor(url);
     // Invalid id → 400, provider without `stores` → 501, both before any request.
@@ -155,7 +156,7 @@ export async function handleRequest(req: http.IncomingMessage, res: http.ServerR
   }
   const providerId = url.searchParams.get('provider') || defaultProvider;
   if (favouritePaths.includes(url.pathname) &&
-      getManifest(providerId).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
+      providerId !== 'sainsburys' && providerId !== 'ocado') {
     return sendJson(res, 501, { error: `Provider "${providerId}" does not support ${url.pathname}` });
   }
   const provider = getProvider(url);

@@ -6,6 +6,7 @@
 import type { GroceryProvider, Product, SearchOptions } from './types';
 import {
   absoluteUrl,
+  asNumber,
   asRecord,
   asRecords,
   clampLimit,
@@ -22,6 +23,7 @@ import {
 const SEARCH_URL = 'https://www.lidl.ie/q/api/search';
 const BASE_URL = 'https://www.lidl.ie';
 const ACCEPT = 'application/mindshift.search+json';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface LidlIrelandOptions {
   fetcher?: FetchLike;
@@ -33,14 +35,8 @@ export interface LidlIrelandOptions {
 // can turn malformed values into a plausible shelf price.
 function firstPrice(...values: unknown[]): number | undefined {
   for (const value of values) {
-    let amount: number | undefined;
-    if (typeof value === 'number') amount = value;
-    if (typeof value === 'string') {
-      const text = value.trim();
-      if (/^(?:€\s*)?\d+(?:[.,]\d{1,2})?$/.test(text)) {
-        amount = Number(text.replace(/^€\s*/, '').replace(',', '.'));
-      }
-    }
+    if (typeof value === 'string' && !/^(?:€\s*)?[\d.,]+$/.test(value.trim())) continue;
+    const amount = asNumber(value);
     if (amount !== undefined && Number.isFinite(amount) && amount >= 0) return amount;
   }
   return undefined;
@@ -50,7 +46,7 @@ function conditionalPrice(price: Record<string, unknown>): boolean {
   const discount = asRecord(price.discount);
   const text = firstString(discount.discountText) ?? '';
   return discount.fromNormalPriceForLidlPlus === true ||
-    /mix\s*(?:['’]?n['’]?|and|&)\s*match|multi[- ]?buy|\bbuy\b|\d+\s+for\b|lidl\s*plus/i.test(text);
+    /mix\s*(?:['’]?n['’]?|and|&)\s*match|multi[- ]?buy|\bbuy\s+\d+\b|\d+\s+for\b|lidl\s*plus/i.test(text);
 }
 
 function regularOldPrice(price: Record<string, unknown>): number | undefined {
@@ -87,6 +83,8 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   const regionsPrices = asRecord(data.regionsPrices);
   const regionPrice = asRecord(regionsPrices['1']);
   const currentPrice = asRecord(regionPrice.currentPrice);
+  const hasRegionalPrice = Object.prototype.hasOwnProperty.call(regionPrice, 'currentPrice');
+  if (hasRegionalPrice && firstPrice(currentPrice.price) === undefined) return undefined;
   // Offer terms can appear only on the regional price while data.price
   // repeats the discounted amount. A multibuy is not a single-item price.
   const conditional = conditionalPrice(price) || conditionalPrice(currentPrice);
@@ -94,16 +92,25 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   if (conditional) {
     // The generic price can repeat the regional RRP without its marker.
     if (asRecord(currentPrice.discount).fromRecommendedPrice !== true) {
-      productPrice = firstPrice(regularOldPrice(currentPrice), regularOldPrice(price));
+      productPrice = Object.prototype.hasOwnProperty.call(currentPrice, 'oldPrice')
+        ? regularOldPrice(currentPrice) : regularOldPrice(price);
     }
   } else {
-    productPrice = firstPrice(currentPrice.price, price.price);
+    productPrice = hasRegionalPrice
+      ? firstPrice(currentPrice.price) : firstPrice(price.price);
   }
   const canonicalPath = firstString(data.canonicalUrl, data.url);
-  const id = firstString(data.id, data.productId, data.code, canonicalPath);
+  const id = [data.id, data.productId, data.code, canonicalPath]
+    .map((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+      ? String(value) : firstString(value))
+    .find((value) => value !== undefined);
   if (!id || productPrice === undefined) return undefined;
   const pricePerUnit = asRecord(data.pricePerUnit);
-  const unitPrice = conditional ? undefined : firstPrice(pricePerUnit.price, data.basePrice);
+  // Generic unit prices are trustworthy only when the selected shelf price
+  // matches their generic price context. Otherwise omit the optional field.
+  const matchingUnitContext = !hasRegionalPrice || firstPrice(price.price) === productPrice;
+  const unitPrice = conditional || !matchingUnitContext
+    ? undefined : firstPrice(pricePerUnit.price, data.basePrice);
   const unitMeasure = firstString(
     pricePerUnit.unit,
     pricePerUnit.unitOfMeasure,
@@ -151,15 +158,25 @@ export class LidlIrelandProvider implements GroceryProvider {
     url.searchParams.set('fetchsize', String(limit));
     url.searchParams.set('offset', String(offset));
 
-    const payload = await jsonResponse<unknown>(
-      await this.fetcher(url, {
-        headers: {
-          Accept: ACCEPT,
-          'Accept-Language': 'en-IE,en;q=0.9',
-        },
-      }),
-      'Lidl Ireland'
-    );
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    let payload: unknown;
+    try {
+      payload = await jsonResponse<unknown>(
+        await this.fetcher(url, {
+          signal,
+          headers: {
+            Accept: ACCEPT,
+            'Accept-Language': 'en-IE,en;q=0.9',
+          },
+        }),
+        'Lidl Ireland'
+      );
+    } catch (error) {
+      if (signal.aborted || (error instanceof Error && error.name === 'TimeoutError')) {
+        throw new Error(`Lidl Ireland request timed out after ${REQUEST_TIMEOUT_MS} ms`);
+      }
+      throw error;
+    }
     const root = asRecord(payload);
     const source = root.items;
     const rows = requireRecordArray(source, 'Lidl Ireland', 'items collection');

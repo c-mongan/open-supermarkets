@@ -9,6 +9,10 @@ import fs = require('fs');
 
 async function main() {
   const originalExists = fs.existsSync;
+  const checkedExists = (path: fs.PathLike) => {
+    assert.notEqual(path, undefined, 'login lookup must use a real session path');
+    return originalExists(path);
+  };
   const originalCreate = ProviderFactory.create;
   const originalConnect = Server.prototype.connect;
   const originalHuSearch = TescoHuProvider.prototype.search;
@@ -21,7 +25,7 @@ async function main() {
   let searchCalls = 0;
   const client = new Client({ name: 'capability-regression', version: '1.0.0' });
   try {
-    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/session.json') ? false : originalExists(path)) as typeof fs.existsSync;
+    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/session.json') ? false : checkedExists(path)) as typeof fs.existsSync;
     ProviderFactory.create = (() => { throw new Error('Unexpected legacy constructor'); }) as typeof ProviderFactory.create;
     globalThis.fetch = async () => { throw new Error('Unexpected retailer request'); };
     TescoHuProvider.prototype.search = async () => { searchCalls++; return []; };
@@ -71,23 +75,37 @@ async function main() {
       assert.match(JSON.stringify(result.content), new RegExp(`Not logged in to ${provider}`));
       assert.doesNotMatch(JSON.stringify(result.content), /sainsburys|Unexpected legacy constructor/);
     }
+    // A session cannot grant a provider capabilities that it does not declare.
+    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.tesco-hu/session.json') ||
+      (!String(path).endsWith('/session.json') && checkedExists(path))) as typeof fs.existsSync;
+    for (const name of ['grocery_slots', 'grocery_book_slot', 'grocery_checkout', 'grocery_orders']) {
+      const result = await client.callTool({ name, arguments: { provider: 'tesco-hu' } });
+      assert.equal(result.isError, true, name);
+      assert.match(JSON.stringify(result.content), /does not support/, name);
+      assert.doesNotMatch(JSON.stringify(result.content), /Unexpected legacy|TypeError|Not logged in/, name);
+    }
     // Each provider-specific tool works with only its own fake session.
     let regularsCalls = 0;
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.ocado/session.json') ||
-      (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
+      (!String(path).endsWith('/session.json') && checkedExists(path))) as typeof fs.existsSync;
     ProviderFactory.create = ((name: string) => {
       assert.equal(name, 'ocado');
       return { getRegulars: async () => { regularsCalls++; return []; } };
     }) as typeof ProviderFactory.create;
     const regulars = await client.callTool({ name: 'ocado_regulars', arguments: {} });
     assert.notEqual(regulars.isError, true, JSON.stringify(regulars.content));
-    assert.equal(regularsCalls, 1);
+    const regularsExtraProvider = await client.callTool({ name: 'ocado_regulars', arguments: { provider: 'lidl-ie' } });
+    assert.notEqual(regularsExtraProvider.isError, true, JSON.stringify(regularsExtraProvider.content));
+    assert.equal(regularsCalls, 2);
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.tesco/session.json') ||
       String(path).endsWith('/.tesco/staples.json') ||
-      (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
+      (!String(path).endsWith('/session.json') && checkedExists(path))) as typeof fs.existsSync;
     const stapleResult = await client.callTool({ name: 'tesco_staples', arguments: { action: 'view' } });
     assert.notEqual(stapleResult.isError, true, JSON.stringify(stapleResult.content));
     assert.match(JSON.stringify(stapleResult.content), /Test milk/);
+    const staplesExtraProvider = await client.callTool({ name: 'tesco_staples', arguments: { action: 'view', provider: 'lidl-ie' } });
+    assert.notEqual(staplesExtraProvider.isError, true, JSON.stringify(staplesExtraProvider.content));
+    assert.match(JSON.stringify(staplesExtraProvider.content), /Test milk/);
     console.log('  ✓ MCP catalogue capabilities and provider-specific login gates');
   } finally {
     fs.existsSync = originalExists;

@@ -14,8 +14,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ProviderFactory, ProviderName, compareProduct } from './providers/index.js';
-import { createProvider, getManifest, list as listManifests } from './providers/registry.js';
-import type { FullGroceryProvider } from './providers/types.js';
+import { createProvider, getManifest, supports, list as listManifests } from './providers/registry.js';
+import type { FullGroceryProvider, Capability } from './providers/types.js';
 import { money } from './format.js';
 import { explain } from './errors.js';
 import {
@@ -23,6 +23,8 @@ import {
   listProviderStores,
   parseStoreSearchOptions,
   prepareStoreId,
+  requireSearchQuery,
+  validateBatchSearchQueries,
   selectStoreForSearch,
 } from './stores.js';
 import * as fs from 'fs';
@@ -433,7 +435,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Search-only providers cannot use the legacy authenticated operations.
     // Reject before constructing a provider or making a retailer request.
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
-    if (catalogueTool) prepareStoreId(providerName, (args as any).store_id);
+    if (catalogueTool) {
+      prepareStoreId(providerName, (args as any).store_id);
+      if (name === 'grocery_search') requireSearchQuery((args as any).query);
+      else validateBatchSearchQueries((args as any).queries);
+    }
     const storeTool = name === 'grocery_stores';
     const storeOptions = storeTool ? parseStoreSearchOptions({
       query: (args as any).query,
@@ -447,6 +453,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (storeTool) assertStoresSupported(providerName);
     const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
+    const toolCapabilities: Record<string, Capability> = {
+      grocery_basket_view: 'basket', grocery_basket_add: 'basket',
+      grocery_basket_remove: 'basket', grocery_basket_update: 'basket',
+      grocery_basket_clear: 'basket', grocery_basket_add_batch: 'basket',
+      grocery_slots: 'slots', grocery_book_slot: 'slots',
+      grocery_checkout: 'checkout', grocery_orders: 'orders',
+    };
+    const requiredCapability = toolCapabilities[name];
+    if (requiredCapability && !supports(providerName, requiredCapability)) {
+      return textResult(`Provider "${providerName}" does not support ${name}. Missing capability: ${requiredCapability}.`, true);
+    }
     if (!catalogueTool && !storeTool && !globalTool && !providerSpecificTool &&
         getManifest(providerName).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
       return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);
@@ -543,8 +560,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = catalogueTool &&
-      (searchesAnonymously(providerName) || SESSION_PATHS[providerName] === undefined)
+    const loginError = providerSpecificTool || (catalogueTool &&
+      (searchesAnonymously(providerName) || SESSION_PATHS[providerName] === undefined))
       ? null : requireLogin(providerName);
 
     // ── grocery_search ──
