@@ -177,7 +177,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             longitude: { type: 'number', description: 'Longitude for a nearby search (with latitude)' },
             range: { type: 'number', description: 'Nearby search radius in kilometres' },
             shopping_mode: { type: 'string', enum: ['pickup', 'delivery'] },
-            limit: { type: 'number', description: 'Maximum stores to return (default: 10)', default: 10 },
+            limit: { type: 'integer', minimum: 1, description: 'Maximum stores to return (default: 10, capped at 100)', default: 10 },
           },
           required: ['provider'],
         },

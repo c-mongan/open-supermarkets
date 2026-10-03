@@ -279,6 +279,8 @@ async function mcpRoutes(): Promise<void> {
       const byName = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema as any]));
       assert.deepEqual(byName.grocery_stores.properties.provider.enum,
         PROVIDERS.filter((p) => p.capabilities.includes('stores')).map((p) => p.id));
+      assert.equal(byName.grocery_stores.properties.limit.type, 'integer');
+      assert.equal(byName.grocery_stores.properties.limit.minimum, 1);
       assert.equal(byName.grocery_search.properties.store_id.type, 'string');
       assert.equal(byName.grocery_search_batch.properties.store_id.type, 'string');
       assert.ok(byName.grocery_search.properties.provider.enum.includes('lidl-ie'));
@@ -369,7 +371,8 @@ async function mcpRoutes(): Promise<void> {
         assert.equal(r.isError, true, r.text);
         assert.match(r.text, /query must be a non-empty string/);
       }
-      for (const queries of [null, [], ['milk', ' '], [null], [{ query: 5 }]]) {
+      for (const queries of [null, [], ['milk', ' '], [null], [{ query: 5 }],
+        ...[-1, 0, 1.5, null, '3'].map((limit) => [{ query: 'milk', limit }])]) {
         const r = await call('grocery_search_batch', { provider: 'fake-stores', store_id: 's1', queries });
         assert.equal(r.isError, true, r.text);
       }
@@ -506,6 +509,9 @@ async function cliRoutes(): Promise<void> {
       [['search', '--batch', '-'], '[null]'],
       [['search', '--batch', '-'], '[{"query":5}]'],
       [['search', '--batch', '-'], '{bad-json}'],
+      ...[-1, 0, 1.5, null, '3'].map((limit) => [
+        ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', limit }]),
+      ]),
     ] as Array<[string[], string | undefined]>) {
       const r = runCli(['--provider', 'fake-stores', '--store-id', 's1', ...args], input);
       assert.equal(r.status, 1, r.stderr);
