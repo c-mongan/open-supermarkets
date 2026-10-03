@@ -673,6 +673,35 @@ test('tesco: malformed seller/price containers cannot hide behind alternate pric
   }
 });
 
+test('tesco: malformed alternate regular prices fail despite a valid primary price', async () => {
+  const node=jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;node.price={actual:'bad2'};
+  for(const mode of ['xapi','lookup','index']) {
+    const entries=mode==='xapi'?[[{data:{search:{results:[{node}]}}}]]:mode==='lookup'?[[{data:{product:node}}]]:[{ie:{ghs:{products:{results:[{tpnb:node.tpnb}]}}}},[{data:{product:node}}]];
+    const provider=new TescoIrelandProvider({strategy:mode==='index'?'index':'xapi',fetcher:queueFetch(entries)});
+    await rejects(()=>mode==='lookup'?provider.getProduct(node.tpnb):provider.search('milk'), /invalid regular price/);
+  }
+});
+
+test('tesco: auth/rate-limit/unknown GraphQL metadata stops projection-shaped errors', async () => {
+  for(const extensions of ['UNAUTHENTICATED','FORBIDDEN','RATE_LIMITED','THROTTLED','HTTP_TOO_MANY_REQUESTS','UNKNOWN'].map(code=>({code})).concat([{http:{status:429}},{status:401}])) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query".',extensions}]}]],calls)});
+    await rejects(()=>provider.search('milk'), /Cannot query field/);assert.equal(calls.length,1);
+  }
+});
+
+test('tesco: explicit GraphQL validation code permits safe root projection fallback', async () => {
+  const calls=[];
+  const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query".',extensions:{code:'GRAPHQL_VALIDATION_FAILED'}}]}],jsonFixture('tesco-index-search.json'),jsonFixture('tesco-hydration.json')],calls)});
+  assert.equal((await provider.search('milk')).length,2);assert.equal(calls.length,3);
+});
+
+test('tesco: authentication text cannot hide in a root projection-shaped message', async () => {
+  const calls=[];
+  const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query". Unauthorized'}]}]],calls)});
+  await rejects(()=>provider.search('milk'), /Unauthorized/);assert.equal(calls.length,1);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

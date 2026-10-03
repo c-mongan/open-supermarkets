@@ -208,13 +208,14 @@ function productPrice(node: Record<string, unknown>): number | undefined {
   const firstSeller = seller(node);
   const sellerPrice = optionalRecord(firstSeller.price, 'seller price');
   const directPrice = optionalRecord(node.price, 'direct price');
-  for (const value of [sellerPrice.actual, directPrice.actual]) {
-    if (value === undefined || value === null) continue;
-    const price = firstNumber(value);
-    if (price === undefined) throw new ProviderProtocolError('Tesco Ireland', 'invalid regular price');
-    return price;
-  }
-  return undefined;
+  const prices = [sellerPrice.actual, directPrice.actual]
+    .filter(value => value !== undefined && value !== null)
+    .map(value => {
+      const price = firstNumber(value);
+      if (price === undefined) throw new ProviderProtocolError('Tesco Ireland', 'invalid regular price');
+      return price;
+    });
+  return prices[0];
 }
 
 function unitPrice(node: Record<string, unknown>): Product['unit_price'] | undefined {
@@ -279,10 +280,23 @@ function graphQlMessages(value: unknown): string[] {
     compactSnippet(firstString(asRecord(error).message) ?? 'unknown GraphQL error'));
 }
 
-function isProjectionFailure(messages: readonly string[]): boolean {
-  return messages.every((message) =>
-    /(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?(?=[\s.]|$)/i.test(message) ||
-    /unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search\b/i.test(message)
+function isProjectionFailure(messages: readonly string[], envelopes: GraphQLEnvelope[]): boolean {
+  const errors = envelopes.flatMap(envelope => Array.isArray(envelope.errors) ? envelope.errors : []);
+  const knownValidationCodes = errors.every(error => {
+    const value = asRecord(error).extensions;
+    if (value === undefined || value === null) return true;
+    if (typeof value !== 'object' || Array.isArray(value)) return false;
+    const extensions = asRecord(value);
+    // Unknown codes or explicit HTTP error metadata cannot establish a safe
+    // schema fallback. In particular, never retry auth/rate-limit errors.
+    if (extensions.code !== undefined && extensions.code !== null &&
+        extensions.code !== 'GRAPHQL_VALIDATION_FAILED') return false;
+    return extensions.status === undefined && asRecord(extensions.http).status === undefined;
+  });
+  return knownValidationCodes && messages.every((message) =>
+    !/unauth|authenticat|authorization|forbidden|rate.?limit|throttl|too many requests/i.test(message) &&
+    (/^(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?(?=[\s.]|$)/i.test(message) ||
+    /^unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search\b/i.test(message))
   );
 }
 
@@ -420,7 +434,7 @@ export class TescoIrelandProvider implements GroceryProvider {
           throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned no results array');
         }
       }
-      if (isProjectionFailure(messages)) {
+      if (isProjectionFailure(messages, envelopes)) {
         throw new TescoSearchProjectionError(messages.slice(0, 3).join('; '));
       }
       throw new ProviderProtocolError('Tesco Ireland', messages.slice(0, 3).join('; '));
