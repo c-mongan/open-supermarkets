@@ -277,3 +277,12 @@ test('Lidl prefers a valid regional regular old price over the generic old price
   const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
   assert.equal(product.retail_price.price, 2.79);
 });
+
+test('Lidl identifies a direct response-body timeout error', async () => {
+  const fetcher = async () => ({ ok: true, status: 200, async text() {
+    const error = new Error('body stalled');
+    error.name = 'TimeoutError';
+    throw error;
+  } });
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out after 15000 ms/);
+});
