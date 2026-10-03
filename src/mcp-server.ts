@@ -96,6 +96,14 @@ function textResult(text: string, isError = false) {
   };
 }
 
+function searchLimit(value: unknown, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new RangeError('limit must be a positive integer');
+  }
+  return Math.min(value, 100);
+}
+
 // ─── Tool definitions ────────────────────────────────────────────
 
 const providerEnum = { type: 'string', enum: PROVIDERS, description: 'Supermarket provider: sainsburys, ocado, tesco, or tesco-hu (Hungary)' };
@@ -148,7 +156,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             provider: { ...searchProviderEnum(), default: 'sainsburys' },
             query: { type: 'string', description: 'Search term (e.g., "milk", "organic eggs", "chicken breast")' },
-            limit: { type: 'number', description: 'Maximum results to return (default: 10)', default: 10 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Maximum results to return (default: 10, maximum: 100)', default: 10 },
             store_id: storeIdProperty,
           },
           required: ['query'],
@@ -206,7 +214,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Product queries, e.g. ["semi skimmed milk","free range eggs"]',
             },
-            limit: { type: 'number', description: 'Candidates per query (default: 5)', default: 5 },
+            limit: { type: 'integer', minimum: 1, maximum: 100, description: 'Candidates per query (default: 5, maximum: 100)', default: 5 },
           },
           required: ['queries'],
         },
@@ -439,6 +447,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       prepareStoreId(providerName, (args as any).store_id);
       if (name === 'grocery_search') requireSearchQuery((args as any).query);
       else validateBatchSearchQueries((args as any).queries);
+      searchLimit((args as any).limit, name === 'grocery_search' ? 10 : 5);
     }
     const storeTool = name === 'grocery_stores';
     const storeOptions = storeTool ? parseStoreSearchOptions({
@@ -503,8 +512,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_compare ──
     if (name === 'grocery_search_batch') {
-      const { queries = [], limit = 5, store_id } =
-        args as { queries?: string[]; limit?: number; store_id?: unknown };
+      const { queries = [], store_id } = args as { queries?: string[]; store_id?: unknown };
+      const limit = searchLimit(args.limit, 5);
       if (!queries.length) return textResult('Give me at least one query.', true);
       const storeId = prepareStoreId(providerName, store_id);
       const { batchSearch } = await import('./batch.js');
@@ -568,8 +577,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (name === 'grocery_search') {
       // Search can sometimes work without login for some providers, but check anyway
       if (loginError) return textResult(loginError, true);
-      const { query, limit = 10, store_id } =
-        args as { query: string; limit?: number; store_id?: unknown };
+      const { query, store_id } = args as { query: string; store_id?: unknown };
+      const limit = searchLimit(args.limit, 10);
       const storeId = prepareStoreId(providerName, store_id);
       const provider = await createProvider(providerName);
       if (storeId) await selectStoreForSearch(providerName, provider, storeId);

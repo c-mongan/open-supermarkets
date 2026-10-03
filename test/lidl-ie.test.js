@@ -324,3 +324,16 @@ test('Lidl omits generic unit price when the selected regional shelf price diffe
   assert.equal(product.retail_price.price, 3.25);
   assert.equal(product.unit_price, undefined);
 });
+
+
+test('Lidl accepts complete EUR labels but rejects other currencies', async () => {
+  for (const price of ['EUR 2.79', '2.79 EUR', '€2.79', '2.79 €']) {
+    const payload = { items: [{ gridbox: { data: { id: 'eur', fullTitle: 'Milk', price: { price } } } }] };
+    const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+    assert.equal(product.retail_price.price, 2.79);
+  }
+  for (const price of ['GBP 2.79', '2.79 GBP', 'USD 2.79', '£2.79', '$2.79', 'EUR -2.79']) {
+    const payload = { items: [{ gridbox: { data: { id: 'non-eur', fullTitle: 'Milk', price: { price } } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});

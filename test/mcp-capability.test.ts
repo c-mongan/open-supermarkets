@@ -23,12 +23,13 @@ async function main() {
   let server: Server | undefined;
   let connection: Promise<void> | undefined;
   let searchCalls = 0;
+  let lastLimit: number | undefined;
   const client = new Client({ name: 'capability-regression', version: '1.0.0' });
   try {
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/session.json') ? false : checkedExists(path)) as typeof fs.existsSync;
     ProviderFactory.create = (() => { throw new Error('Unexpected legacy constructor'); }) as typeof ProviderFactory.create;
     globalThis.fetch = async () => { throw new Error('Unexpected retailer request'); };
-    TescoHuProvider.prototype.search = async () => { searchCalls++; return []; };
+    TescoHuProvider.prototype.search = async (_query, options) => { searchCalls++; lastLimit = options?.limit; return []; };
     LidlIrelandProvider.prototype.search = async () => { searchCalls++; return []; };
     Server.prototype.connect = function () {
       server = this;
@@ -69,6 +70,19 @@ async function main() {
       }
     }
     assert.equal(searchCalls, 4);
+    for (const name of ['grocery_search', 'grocery_search_batch']) {
+      for (const limit of [0, -1, 1.5, '10']) {
+        const result = await client.callTool({ name, arguments: { provider: 'tesco-hu', query: 'milk', queries: ['milk'], limit } });
+        assert.equal(result.isError, true);
+        assert.match(JSON.stringify(result.content), /limit must be a positive integer/);
+      }
+    }
+    assert.equal(searchCalls, 4, 'invalid limits must fail before retailer search');
+    for (const name of ['grocery_search', 'grocery_search_batch']) {
+      const result = await client.callTool({ name, arguments: { provider: 'tesco-hu', query: 'milk', queries: ['milk'], limit: 1000000 } });
+      assert.notEqual(result.isError, true, JSON.stringify(result.content));
+      assert.equal(lastLimit, 100, 'large limits must be bounded before provider search');
+    }
     for (const [name, provider] of [['ocado_regulars', 'ocado'], ['tesco_staples', 'tesco']]) {
       const result = await client.callTool({ name, arguments: {} });
       assert.equal(result.isError, true, name);
