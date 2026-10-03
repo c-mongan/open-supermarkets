@@ -14,8 +14,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ProviderFactory, ProviderName, compareProduct } from './providers/index.js';
-import { createProvider, getManifest } from './providers/registry.js';
-import type { FullGroceryProvider } from './providers/types.js';
+import { createProvider, getManifest, supports } from './providers/registry.js';
+import type { FullGroceryProvider, Capability } from './providers/types.js';
 import { money } from './format.js';
 import { explain } from './errors.js';
 import * as fs from 'fs';
@@ -369,6 +369,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
     const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
+    const toolCapabilities: Record<string, Capability> = {
+      grocery_basket_view: 'basket', grocery_basket_add: 'basket',
+      grocery_basket_remove: 'basket', grocery_basket_update: 'basket',
+      grocery_basket_clear: 'basket', grocery_basket_add_batch: 'basket',
+      grocery_slots: 'slots', grocery_book_slot: 'slots',
+      grocery_checkout: 'checkout', grocery_orders: 'orders',
+    };
+    const requiredCapability = toolCapabilities[name];
+    if (requiredCapability && !supports(providerName, requiredCapability)) {
+      return textResult(`Provider "${providerName}" does not support ${name}. Missing capability: ${requiredCapability}.`, true);
+    }
     if (!catalogueTool && !globalTool && !providerSpecificTool &&
         getManifest(providerName).capabilities.every(capability => capability === 'search')) {
       return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);

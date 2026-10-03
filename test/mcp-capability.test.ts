@@ -71,6 +71,15 @@ async function main() {
       assert.match(JSON.stringify(result.content), new RegExp(`Not logged in to ${provider}`));
       assert.doesNotMatch(JSON.stringify(result.content), /sainsburys|Unexpected legacy constructor/);
     }
+    // A session cannot grant a provider capabilities that it does not declare.
+    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.tesco-hu/session.json') ||
+      (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
+    for (const name of ['grocery_slots', 'grocery_book_slot', 'grocery_checkout', 'grocery_orders']) {
+      const result = await client.callTool({ name, arguments: { provider: 'tesco-hu' } });
+      assert.equal(result.isError, true, name);
+      assert.match(JSON.stringify(result.content), /does not support/, name);
+      assert.doesNotMatch(JSON.stringify(result.content), /Unexpected legacy|TypeError|Not logged in/, name);
+    }
     // Each provider-specific tool works with only its own fake session.
     let regularsCalls = 0;
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.ocado/session.json') ||
