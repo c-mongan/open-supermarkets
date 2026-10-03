@@ -35,7 +35,7 @@ export interface LidlIrelandOptions {
 // can turn malformed values into a plausible shelf price.
 function firstPrice(...values: unknown[]): number | undefined {
   for (const value of values) {
-    if (typeof value === 'string' && !/^(?:€\s*)?[\d.,]+$/.test(value.trim())) continue;
+    if (typeof value === 'string' && !/^(?:(?:€|EUR)\s*[\d.,]+|[\d.,]+\s*(?:€|EUR)|[\d.,]+)$/i.test(value.trim())) continue;
     const amount = asNumber(value);
     if (amount !== undefined && Number.isFinite(amount) && amount >= 0) return amount;
   }
