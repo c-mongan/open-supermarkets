@@ -172,7 +172,10 @@ program
   .option('--json', 'Output as JSON')
   .action(async (query, options, cmd) => {
     try {
-      const limit = parsePositiveInt(options.limit, 'limit');
+      const limit = Number(options.limit);
+      if (!Number.isInteger(limit) || limit < 1) {
+        throw new Error(`limit must be a positive integer, got "${options.limit}"`);
+      }
       const globals = cmd.optsWithGlobals();
 
       // `--country` picks the first search-capable provider there, unless a
@@ -189,6 +192,23 @@ program
 
       // Validate and capability-check the store before any provider code loads.
       const { prepareStoreId, selectStoreForSearch, requireSearchQuery, validateBatchSearchQueries } = await import('./stores');
+      let queries: import('./batch').BatchQuery[] | undefined;
+      if (options.batch) {
+        const { parseBatchInput } = await import('./batch');
+        const raw =
+          options.batch === '-'
+            ? require('fs').readFileSync(0, 'utf-8')
+            : require('fs').readFileSync(
+                options.batch.startsWith('~')
+                  ? require('path').join(require('os').homedir(), options.batch.slice(1))
+                  : options.batch,
+                'utf-8'
+              );
+        queries = parseBatchInput(raw);
+        validateBatchSearchQueries(queries);
+      } else {
+        requireSearchQuery(query);
+      }
       const storeId = prepareStoreId(providerId, globals.storeId);
       const createSearchProvider = async () => {
         const provider = await createProvider(providerId);
@@ -199,19 +219,8 @@ program
       const scope = storeId ? { storeId } : {};
 
       // Batch mode: thirty queries in one invocation instead of thirty.
-      if (options.batch) {
-        const { batchSearch, parseBatchInput } = await import('./batch');
-        const raw =
-          options.batch === '-'
-            ? require('fs').readFileSync(0, 'utf-8')
-            : require('fs').readFileSync(
-                options.batch.startsWith('~')
-                  ? require('path').join(require('os').homedir(), options.batch.slice(1))
-                  : options.batch,
-                'utf-8'
-              );
-        const queries = parseBatchInput(raw);
-        validateBatchSearchQueries(queries);
+      if (queries) {
+        const { batchSearch } = await import('./batch');
         const provider = await createSearchProvider();
         const results = await batchSearch(provider, queries, { limit, ...scope });
 
@@ -235,7 +244,6 @@ program
         return;
       }
 
-      requireSearchQuery(query);
       const provider = await createSearchProvider();
       let products: any[] = await provider.search(query, { limit, ...scope });
 
@@ -1019,6 +1027,9 @@ program.hook('preAction', (_program, command) => {
   if (capability) {
     const provider = command.optsWithGlobals().provider;
     try {
+      if (command.name() === 'book' && provider === 'ocado') {
+        throw new Error('ocado does not support slot booking; only slot reads are available.');
+      }
       assertCapability(provider, capability);
     } catch (error) {
       console.error(explain(error, { provider, action: command.name() }));
