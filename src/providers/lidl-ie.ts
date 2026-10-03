@@ -22,6 +22,7 @@ import {
 const SEARCH_URL = 'https://www.lidl.ie/q/api/search';
 const BASE_URL = 'https://www.lidl.ie';
 const ACCEPT = 'application/mindshift.search+json';
+const REQUEST_TIMEOUT_MS = 15_000;
 
 export interface LidlIrelandOptions {
   fetcher?: FetchLike;
@@ -50,7 +51,7 @@ function conditionalPrice(price: Record<string, unknown>): boolean {
   const discount = asRecord(price.discount);
   const text = firstString(discount.discountText) ?? '';
   return discount.fromNormalPriceForLidlPlus === true ||
-    /mix\s*(?:['’]?n['’]?|and|&)\s*match|multi[- ]?buy|\bbuy\b|\d+\s+for\b|lidl\s*plus/i.test(text);
+    /mix\s*(?:['’]?n['’]?|and|&)\s*match|multi[- ]?buy|\bbuy\s+\d+\b|\d+\s+for\b|lidl\s*plus/i.test(text);
 }
 
 function regularOldPrice(price: Record<string, unknown>): number | undefined {
@@ -97,7 +98,8 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
       productPrice = firstPrice(regularOldPrice(currentPrice), regularOldPrice(price));
     }
   } else {
-    productPrice = firstPrice(currentPrice.price, price.price);
+    productPrice = Object.prototype.hasOwnProperty.call(regionPrice, 'currentPrice')
+      ? firstPrice(currentPrice.price) : firstPrice(price.price);
   }
   const canonicalPath = firstString(data.canonicalUrl, data.url);
   const id = firstString(data.id, data.productId, data.code, canonicalPath);
@@ -151,15 +153,25 @@ export class LidlIrelandProvider implements GroceryProvider {
     url.searchParams.set('fetchsize', String(limit));
     url.searchParams.set('offset', String(offset));
 
-    const payload = await jsonResponse<unknown>(
-      await this.fetcher(url, {
-        headers: {
-          Accept: ACCEPT,
-          'Accept-Language': 'en-IE,en;q=0.9',
-        },
-      }),
-      'Lidl Ireland'
-    );
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    let payload: unknown;
+    try {
+      payload = await jsonResponse<unknown>(
+        await this.fetcher(url, {
+          signal,
+          headers: {
+            Accept: ACCEPT,
+            'Accept-Language': 'en-IE,en;q=0.9',
+          },
+        }),
+        'Lidl Ireland'
+      );
+    } catch (error) {
+      if (signal.aborted || (error instanceof Error && error.name === 'TimeoutError')) {
+        throw new Error(`Lidl Ireland request timed out after ${REQUEST_TIMEOUT_MS} ms`);
+      }
+      throw error;
+    }
     const root = asRecord(payload);
     const source = root.items;
     const rows = requireRecordArray(source, 'Lidl Ireland', 'items collection');

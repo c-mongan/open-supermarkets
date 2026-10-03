@@ -193,3 +193,46 @@ test('Lidl rejects a duplicated regional RRP without its generic marker', async 
   } } }] };
   await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
 });
+
+
+test('Lidl retains an unconditional discount whose message says buy now', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'unconditional', fullTitle: 'Milk', price: { price: 1.50 },
+    regionsPrices: { '1': { currentPrice: {
+      price: 1.50, oldPrice: 1.79, discount: { discountText: 'Buy now and save 16%' },
+    } } },
+  } } }] };
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 1.50);
+});
+
+test('Lidl rejects a malformed present regional price instead of using generic data', async () => {
+  for (const currentPrice of [null, [], 'bad', {}, { price: -1 }, { price: 'bad' }]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'malformed-regional', fullTitle: 'Milk', price: { price: 2.25 },
+      regionsPrices: { '1': { currentPrice } },
+    } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});
+
+test('Lidl passes a deadline signal and identifies upstream timeouts', async () => {
+  let signal;
+  const fetcher = async (_input, init) => {
+    signal = init.signal;
+    const error = new Error('upstream stalled');
+    error.name = 'TimeoutError';
+    throw error;
+  };
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out after 15000 ms/);
+  assert.ok(signal instanceof AbortSignal);
+});
+
+test('Lidl identifies timeouts during response-body reading', async () => {
+  const fetcher = async () => ({ ok: true, status: 200, async text() {
+    const error = new Error('body stalled');
+    error.name = 'TimeoutError';
+    throw error;
+  } });
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out/);
+});
