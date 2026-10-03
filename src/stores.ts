@@ -57,6 +57,10 @@ export function validateBatchSearchQueries(value: unknown): void {
   for (const item of value) {
     const query = typeof item === 'string' ? item : item !== null && typeof item === 'object' ? item.query : undefined;
     requireSearchQuery(query);
+    if (item !== null && typeof item === 'object' &&
+        (item.storeId !== undefined || item.store_id !== undefined)) {
+      throw invalid('Use one store id for the whole batch; per-query store ids are unsupported');
+    }
     if (item !== null && typeof item === 'object' && item.limit !== undefined &&
         (typeof item.limit !== 'number' || !Number.isInteger(item.limit) || item.limit <= 0)) {
       throw invalid('query limit must be a positive integer');

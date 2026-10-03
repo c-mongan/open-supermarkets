@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { ProviderFactory } from '../src/providers';
-import { SainsburysProvider } from '../src/providers/sainsburys';
+import { ProviderFactory, getManifest } from '../src/providers';
+import http = require('node:http');
+import https = require('node:https');
 import fs = require('fs');
 
 // Exercise the real MCP request handlers without stdio, credentials or retailer calls.
@@ -22,7 +23,12 @@ async function main() {
   };
   const originalExists = fs.existsSync;
   const originalCreate = ProviderFactory.create;
-  const originalSearch = SainsburysProvider.prototype.search;
+  const manifest = getManifest('sainsburys');
+  const originalLoad = manifest.load;
+  const originalFetch = globalThis.fetch;
+  const originalHttpRequest = http.request;
+  const originalHttpsRequest = https.request;
+  let searchCalls = 0;
   const originalConnect = Server.prototype.connect;
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   let server: Server | undefined;
@@ -30,8 +36,16 @@ async function main() {
   const client = new Client({ name: 'stock-regression', version: '1.0.0' });
   try {
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.sainsburys/session.json') || originalExists(path)) as typeof fs.existsSync;
-    ProviderFactory.create = (() => provider) as typeof ProviderFactory.create;
-    SainsburysProvider.prototype.search = (async () => products) as typeof originalSearch;
+    ProviderFactory.create = (() => provider) as unknown as typeof ProviderFactory.create;
+    // Replace the registry loader, not an imported class prototype. Node 20
+    // can load a separate ESM class through the registry's dynamic import.
+    manifest.load = async () => class {
+      readonly name = 'sainsburys';
+      async search() { searchCalls++; return products; }
+    };
+    globalThis.fetch = async () => { throw new Error('Unexpected retailer fetch'); };
+    http.request = (() => { throw new Error('Unexpected HTTP request'); }) as typeof http.request;
+    https.request = (() => { throw new Error('Unexpected HTTPS request'); }) as typeof https.request;
     Server.prototype.connect = function () {
       server = this;
       connection = originalConnect.call(this, serverTransport);
@@ -51,10 +65,14 @@ async function main() {
       assert.match(text, /Unknown\n[^\n]*\| Stock unknown \|/, `${name} must distinguish null from false`);
       console.log(`  ✓ ${name} preserves all three stock states`);
     }
+    assert.equal(searchCalls, 1, 'search must use the fixture registry loader');
   } finally {
     fs.existsSync = originalExists;
     ProviderFactory.create = originalCreate;
-    SainsburysProvider.prototype.search = originalSearch;
+    manifest.load = originalLoad;
+    globalThis.fetch = originalFetch;
+    http.request = originalHttpRequest;
+    https.request = originalHttpsRequest;
     Server.prototype.connect = originalConnect;
     await client.close();
     await server?.close();
