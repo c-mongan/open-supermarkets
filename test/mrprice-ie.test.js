@@ -153,7 +153,7 @@ test('mrprice: accepts retailer no-results state without a search grid', async (
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
       { resources: { results: { products: [] } } },
-      '<main><div class="collection-nomatch-text"><p>No results found</p></div></main>',
+      '<main id="MainContent"><form class="search-form" action="/search"><input name="q" value="missing-product"></form><div class="collection-nomatch-text"><p>No results found</p></div></main>',
     ]),
   });
 
@@ -426,6 +426,14 @@ test('mrprice: decodes numeric character references in product names', async () 
   const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
   assert.equal(product.name,"Café Baker’s 1L");
   assert.equal(product.size,'1L');
+});
+
+test('mrprice: ignores hidden and unrelated empty-result messages', async () => {
+  const marker='<div class="collection-nomatch-text">No results found</div>';
+  const form='<form class="search-form" action="/search"><input name="q" value="milk"></form>';
+  for(const html of [marker, `<main id="MainContent">${form}<div hidden>${marker}</div></main>`, `<main id="MainContent">${form}<div style="display:none">${marker}</div></main>`, `<main id="MainContent">${form}</main><footer>${marker}</footer>`, `<main id="MainContent">${form.replace('value="milk"','value="bread"')}${marker}</main>`]) {
+    await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk'), /did not contain the search results grid/);
+  }
 });
 
 async function main() {

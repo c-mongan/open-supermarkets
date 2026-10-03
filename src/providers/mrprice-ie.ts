@@ -191,10 +191,38 @@ function elementContent(html: string, marker: RegExpMatchArray, label: string): 
   );
 }
 
-function hasNoResultsMessage(html: string): boolean {
-  return [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
+function visibleSearchHtml(html: string): string {
+  html = html.replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, ' ');
+  for (const marker of [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)].reverse()) {
+    const tag = marker[0];
+    const style = extractAttribute(tag, 'style') ?? '';
+    if (!/\shidden(?:\s|=|>)/i.test(tag) && extractAttribute(tag, 'aria-hidden') !== 'true' &&
+      !/(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(style)) continue;
+    if (/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i.test(marker[1]!)) continue;
+    const content = elementContent(html, marker, 'hidden element');
+    const afterContent = marker.index! + tag.length + content.length;
+    const close = html.slice(afterContent).match(/^<\/[a-z][\w:-]*\s*>/i)![0];
+    html = html.slice(0, marker.index) + html.slice(afterContent + close.length);
+  }
+  return html;
+}
+
+function hasNoResultsMessage(html: string, query: string): boolean {
+  const main = [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
+    .find(match => extractAttribute(match[0], 'id') === 'MainContent');
+  if (!main) return false;
+  const content = elementContent(html, main, 'main search content');
+  const form = [...content.matchAll(/<(form)\b[^>]*>/gi)]
+    .find(match => hasClass(match[0], 'search-form') && extractAttribute(match[0], 'action') === '/search');
+  if (!form) return false;
+  const formContent = elementContent(content, form, 'search form');
+  const queryInput = [...formContent.matchAll(/<input\b[^>]*>/gi)]
+    .find(match => extractAttribute(match[0], 'name') === 'q');
+  if (!queryInput || htmlText(extractAttribute(queryInput[0], 'value') ?? '') !== query) return false;
+  return [...content.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
     .filter(match => hasClass(match[0], 'collection-nomatch-text'))
-    .some(marker => htmlText(elementContent(html, marker, 'no-results message')) === 'No results found');
+    .some(marker => htmlText(elementContent(content, marker, 'no-results message')) === 'No results found');
 }
 
 function parseHtmlProducts(
@@ -204,21 +232,19 @@ function parseHtmlProducts(
   offset: number,
   query: string
 ): Product[] {
-  // Templates, scripts and comments do not prove a displayed search state.
-  html = html.replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
+  html = visibleSearchHtml(html);
   let grid: string;
   try {
     grid = extractSearchGrid(html);
   } catch (error) {
-    if (error instanceof ProviderProtocolError && error.message.includes('did not contain the search results grid') && hasNoResultsMessage(html)) return [];
+    if (error instanceof ProviderProtocolError && error.message.includes('did not contain the search results grid') && hasNoResultsMessage(html, query)) return [];
     throw error;
   }
   const starts = [...grid.matchAll(/<[^>]+>/g)]
     .filter(match => hasClass(match[0], 'product-card'))
     .map(match => match.index!);
   if (starts.length === 0) {
-    if (hasNoResultsMessage(html)) return [];
+    if (hasNoResultsMessage(html, query)) return [];
     throw new ProviderProtocolError('Mr Price Ireland', 'HTML grid contained no recognized products or genuine no-results message');
   }
   const cards = starts.map((start, index) =>
