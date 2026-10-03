@@ -123,7 +123,7 @@ export interface RawStoreSearchInput {
 }
 
 function present(value: unknown): boolean {
-  return value !== undefined && value !== null;
+  return value !== undefined;
 }
 
 function optionalText(value: unknown, name: string): string | undefined {

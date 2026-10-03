@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { ProviderFactory, ProviderName } from './providers';
-import { assertCapability, createProvider } from './providers/registry';
+import { assertCapability, createProvider, getManifest } from './providers/registry';
 import type { FullGroceryProvider, SearchOptions } from './providers/types';
 import {
   assertStoresSupported,
@@ -148,6 +148,16 @@ export async function handleRequest(req: http.IncomingMessage, res: http.ServerR
     assertCapability(providerIdFor(url), 'basket');
   }
 
+  // Unsupported operations must fail before the legacy factory is called.
+  const favouritePaths = ['/favourites', '/favorites', '/fav-search', '/favorite-search'];
+  if (!BASKET_PATHS.has(url.pathname) && !favouritePaths.includes(url.pathname)) {
+    return sendJson(res, 404, { error: 'Not found' });
+  }
+  const providerId = url.searchParams.get('provider') || defaultProvider;
+  if (favouritePaths.includes(url.pathname) &&
+      getManifest(providerId).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
+    return sendJson(res, 501, { error: `Provider "${providerId}" does not support ${url.pathname}` });
+  }
   const provider = getProvider(url);
 
   if (url.pathname === '/add') {

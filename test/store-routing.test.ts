@@ -80,6 +80,7 @@ async function helpers(): Promise<void> {
       { limit: '0' },
       { limit: '2.5' },
       { query: '  ' },
+      ...['storeId', 'latitude', 'longitude', 'limit', 'query', 'mode', 'postcode', 'range'].map((key) => ({ [key]: null })),
     ]) {
       assert.throws(() => parseStoreSearchOptions(bad), (e: unknown) =>
         e instanceof StoreRoutingError && e.statusCode === 400, JSON.stringify(bad));
@@ -226,6 +227,7 @@ async function httpRoutes(): Promise<void> {
           '/search?provider=ahorramas&q=milk&store_id=s1',
           '/stores?provider=mercadona',
           '/stores?provider=fake-search',
+          '/favourites?provider=fake-stores',
           '/search?provider=fake-stores-broken&q=milk&store_id=s1',
           '/basket?provider=ahorramas',
           '/add?provider=lidl-ie&id=1',
@@ -361,6 +363,11 @@ async function mcpRoutes(): Promise<void> {
           ['grocery_search_batch', { provider: 'ahorramas', queries: ['milk'], store_id: 's1' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'mercadona' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'fake-stores', latitude: 53 }, /together/],
+          ['grocery_stores', { provider: 'lidl-ie', latitude: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', longitude: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', limit: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', query: null }, /non-empty/],
+          ['grocery_stores', { provider: 'fake-stores', shopping_mode: null }, /non-empty/],
           ['grocery_search', { provider: 'fake-stores', query: 'milk', store_id: '' }, /non-empty/],
           ['grocery_search', { provider: 'fake-stores', query: 'milk', store_id: 'bad' }, /unknown store/],
         ] as const) {

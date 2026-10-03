@@ -435,6 +435,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
     if (catalogueTool) prepareStoreId(providerName, (args as any).store_id);
     const storeTool = name === 'grocery_stores';
+    const storeOptions = storeTool ? parseStoreSearchOptions({
+      query: (args as any).query,
+      postcode: (args as any).postcode,
+      latitude: (args as any).latitude,
+      longitude: (args as any).longitude,
+      range: (args as any).range,
+      mode: (args as any).shopping_mode,
+      limit: (args as any).limit,
+    }) : undefined;
     if (storeTool) assertStoresSupported(providerName);
     const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
@@ -494,19 +503,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'grocery_stores') {
-      const a = args as Record<string, unknown>;
-      const options = parseStoreSearchOptions({
-        query: a.query,
-        postcode: a.postcode,
-        latitude: a.latitude,
-        longitude: a.longitude,
-        range: a.range,
-        mode: a.shopping_mode,
-        limit: a.limit,
-      });
-      assertStoresSupported(providerName);
       const provider = await createProvider(providerName);
-      const stores = await listProviderStores(providerName, provider, options);
+      const stores = await listProviderStores(providerName, provider, storeOptions!);
       return textResult(JSON.stringify({ provider: providerName, stores }, null, 2));
     }
 
