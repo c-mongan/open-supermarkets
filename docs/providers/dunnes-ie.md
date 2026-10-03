@@ -21,7 +21,8 @@ JS
 
 `DUNNES_IE_STORE_ID` or the constructor `storeId` can supply the store ID. The
 provider verifies it before the first search. Concurrent searches for the same
-store share one pending validation request. A failed request can be retried. An optional user-owned cookie can
+store share one pending validation request. A failed request can be retried.
+Concurrent explicit selections retain the latest requested store. An optional user-owned cookie can
 be supplied at runtime with `SUPERMARKET_DUNNES_IE_COOKIE_HEADER`. Anonymous
 store discovery and search do not require it. Never publish cookies.
 

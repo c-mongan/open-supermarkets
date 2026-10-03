@@ -544,4 +544,25 @@ test('dunnes: failed shared validation rejects all searches and a later search c
   assert.equal(calls.length,3);
 });
 
+test('dunnes: the latest explicit store selection wins when validations finish out of order', async () => {
+  let finishFirst;
+  const calls=[];
+  const p=new DunnesIrelandProvider({fetcher:async input=>{
+    const url=new URL(input);calls.push(url);
+    if(url.pathname==='/api/stores') {
+      if(url.searchParams.get('RetailerStoreId')==='258') {
+        return new Promise(resolve=>{finishFirst=()=>resolve(response(jsonFixture('dunnes-stores.json')))});
+      }
+      return response({items:[{retailerStoreId:'412',name:'Jetland',currency:'EUR',shoppingModes:['Delivery']}]});
+    }
+    return response(jsonFixture('dunnes-gateway.json'));
+  }});
+  const first=p.selectStore('258');
+  const second=p.selectStore('412');
+  await second;
+  finishFirst(); await first;
+  await p.search('bread');
+  assert.equal(calls[calls.length-1].pathname,'/api/stores/412/search');
+});
+
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });

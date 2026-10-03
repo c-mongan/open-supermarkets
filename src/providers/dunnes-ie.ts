@@ -258,6 +258,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
   private readonly fetcher: FetchLike;
   private storeId?: string;
   private validatedStoreId?: string;
+  private selectionGeneration = 0;
   private readonly storeValidations = new Map<string, Promise<void>>();
   private readonly cookieHeader?: string;
   private readonly gatewayBase: string;
@@ -433,7 +434,9 @@ export class DunnesIrelandProvider implements GroceryProvider {
 
   async selectStore(storeId: string): Promise<void> {
     const selectedStoreId = normalizedStoreId(storeId);
+    const generation = ++this.selectionGeneration;
     await this.validateStore(selectedStoreId);
+    if (generation !== this.selectionGeneration) return;
     this.storeId = selectedStoreId;
     this.validatedStoreId = selectedStoreId;
   }
