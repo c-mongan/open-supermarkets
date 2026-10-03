@@ -440,6 +440,9 @@ export class TescoIrelandProvider implements GroceryProvider {
     const firstPage = Math.floor(offset / limit) + 1;
     const offsetWithinPage = offset % limit;
     const pageCount = offsetWithinPage === 0 ? 1 : 2;
+    if (firstPage + pageCount - 1 > 2_147_483_647) {
+      throw new RangeError('Tesco Ireland offset exceeds the supported GraphQL page range');
+    }
     const operations = Array.from({ length: pageCount }, (_, index) => ({
       operationName: 'Search',
       query: XAPI_SEARCH_QUERY,

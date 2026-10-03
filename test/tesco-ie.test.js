@@ -786,6 +786,19 @@ test('tesco: marked products and malformed type markers stay strict', async () =
   }
 });
 
+test('tesco: xapi rejects pages outside GraphQL Int before any request', async () => {
+  for(const options of [{limit:1,offset:2147483647},{limit:2,offset:4294967293}]) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([],calls)});
+    await assert.rejects(()=>provider.search('milk',options),RangeError);
+    assert.equal(calls.length,0);
+  }
+  const calls=[];
+  const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[]}}}]],calls)});
+  assert.deepEqual(await provider.search('milk',{limit:1,offset:2147483646}),[]);
+  assert.equal(JSON.parse(calls[0].init.body)[0].variables.page,2147483647);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
