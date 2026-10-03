@@ -334,6 +334,15 @@ test('mrprice: ignores pagination for unrelated searches', async () => {
   assert.equal((await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2})).length,1);
 });
 
+
+test('mrprice: reads exact attribute names rather than suffixes', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-data-price="999" data-compare-at-price="499" data-price = "199"><a data-href="/products/wrong" href = "/products/item" data-title="Wrong" title = "Item">Item</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.product_uid,'https://www.mrprice.online/products/item');
+  assert.equal(product.name,'Item');
+  assert.equal(product.retail_price.price,1.99);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

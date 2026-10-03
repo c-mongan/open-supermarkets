@@ -82,8 +82,10 @@ function mapPredictiveProduct(
 }
 
 function extractAttribute(tag: string, attribute: string): string | undefined {
-  const match = tag.match(new RegExp(`${attribute}=["']([^"']+)["']`, 'i'));
-  return match?.[1];
+  for (const match of tag.matchAll(/(?:^|\s)([^\s"'=<>`]+)\s*=\s*(["'])(.*?)\2/g)) {
+    if (match[1]!.toLowerCase() === attribute.toLowerCase()) return match[3];
+  }
+  return undefined;
 }
 
 function hasClass(tag: string, name: string): boolean {
