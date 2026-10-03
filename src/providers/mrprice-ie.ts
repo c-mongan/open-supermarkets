@@ -259,6 +259,9 @@ export class MrPriceIrelandProvider implements GroceryProvider {
     const normalizedQuery = requireQuery(query);
     const limit = clampLimit(options.limit, 10, 20);
     const offset = clampOffset(options.offset);
+    if (offset !== 0) {
+      throw new ProviderInputError('Mr Price Ireland', 'pagination is unsupported; offset must be zero');
+    }
     const predictiveLimit = Math.min(offset + limit, 10);
 
     const suggestionUrl = new URL('/search/suggest.json', this.baseUrl);

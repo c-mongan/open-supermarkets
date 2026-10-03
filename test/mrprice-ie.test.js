@@ -103,15 +103,11 @@ test('mrprice: preserves integer predictive prices in euros', async () => {
   assert.equal(product.retail_price.price, 99);
 });
 
-test('mrprice: applies SearchOptions.offset to predictive results', async () => {
-  const calls = [];
-  const provider = new MrPriceIrelandProvider({
-    fetcher: queueFetch([jsonFixture('mrprice-predictive.json')], calls),
-  });
-  const products = await provider.search('milk', { limit: 1, offset: 1 });
-  assert.equal(products.length, 1);
-  assert.equal(products[0].name, 'Long Life Milk 1L');
-  assert.equal(new URL(calls[0].url).searchParams.get('resources[limit]'), '2');
+test('mrprice: rejects pagination before requests', async () => {
+  const calls=[];
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([],calls)});
+  for(const offset of [1,10,24]) await rejects(() => provider.search('milk',{offset,limit:1}), /pagination is unsupported/);
+  assert.equal(calls.length,0);
 });
 
 test('mrprice: falls back to the full HTML grid when predictive search is empty', async () => {
@@ -140,30 +136,6 @@ test('mrprice: HTML fallback detects stock and expands image templates', async (
   assert.equal(products[0].in_stock, null);
   assert.equal(products[1].name, 'Almond Milk 1L');
   assert.equal(products[1].in_stock, false);
-});
-
-test('mrprice: high offsets use the full HTML grid beyond the predictive cap', async () => {
-  const predictiveProducts = Array.from({ length: 20 }, (_, index) => ({
-    id: `predictive-${index}`,
-    title: `Predictive ${index}`,
-    price: 199,
-    url: `/products/predictive-${index}`,
-  }));
-  const cards = Array.from({ length: 22 }, (_, index) =>
-    `<div class="product-card" data-price="${200 + index}">` +
-      `<a href="/products/html-${index}">HTML ${index}</a></div>`
-  ).join('');
-  const calls = [];
-  const provider = new MrPriceIrelandProvider({
-    fetcher: queueFetch([
-      { resources: { results: { products: predictiveProducts } } },
-      `<div id="js-product-ajax">${cards}</div>`,
-    ], calls),
-  });
-
-  const products = await provider.search('milk', { limit: 2, offset: 20 });
-  assert.equal(calls.length, 2);
-  assert.deepEqual(products.map((product) => product.name), ['HTML 20', 'HTML 21']);
 });
 
 test('mrprice: rejects a challenge page that lacks the search results grid', async () => {
@@ -306,7 +278,7 @@ test('mrprice: short predictive windows use full-search fallback', async () => {
 
 test('mrprice: incomplete HTML windows with later pages are rejected', async () => {
   const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div><a href="/search?page=2&amp;q=milk">Next</a></div>';
-  for(const options of [{offset:24,limit:1},{offset:0,limit:3}]) {
+  for(const options of [{offset:0,limit:3}]) {
     await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',options), /further pages are unsupported/);
   }
 });

@@ -1,6 +1,6 @@
 # Mr Price Ireland
 
-Anonymous catalogue search at `https://www.mrprice.online`. This provider supports search only. It does not support accounts, stores, category filters, baskets, or checkout.
+Anonymous catalogue search at `https://www.mrprice.online`. This provider supports search only. It does not support accounts, stores, category filters, pagination, baskets, or checkout. Nonzero offsets fail before retailer requests.
 
 ```bash
 npm ci
