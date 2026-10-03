@@ -472,7 +472,7 @@ test('supervalu: malformed promotional unit text is unknown', async () => {
 });
 
 test('supervalu: combined pagination and nearby filters can return an empty store page', async () => {
-  for (const options of [{retailerStoreId:'5550',offset:1}, {retailerStoreId:'5550',latitude:53,longitude:-9}]) {
+  for (const options of [{retailerStoreId:'5550',offset:1}, {latitude:53,longitude:-9}]) {
     const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[]}])});
     assert.deepEqual(await provider.listStores(options), []);
   }
@@ -497,6 +497,18 @@ test('supervalu: implicit selection also validates known metadata', async () => 
 test('supervalu: full text store search accepts compact Eircodes', async () => {
   const provider = new SuperValuIrelandProvider({fetcher:queueFetch([jsonFixture('supervalu-stores.json')])});
   assert.deepEqual((await provider.listStores({fullTextSearch:'T12N799'})).map(store => store.store_id), ['5550']);
+});
+
+test('supervalu: rejects exact ID plus nearby lookup before networking', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([],calls)});
+  await rejects(() => provider.listStores({retailerStoreId:'A',latitude:53,longitude:-9}), /retailerStoreId cannot be combined with coordinates/);
+  assert.equal(calls.length, 0);
+});
+
+test('supervalu: full text terms can match separate store fields', async () => {
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{total:1,items:[{retailerStoreId:'A',name:'Killester SuperValu',city:'Dublin'}]}])});
+  assert.deepEqual((await provider.listStores({fullTextSearch:'Killester Dublin'})).map(store => store.store_id), ['A']);
 });
 
 (async () => {

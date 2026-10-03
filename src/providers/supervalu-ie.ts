@@ -203,7 +203,7 @@ function storeMatches(store: Store, fullTextSearch?: string, postcode?: string):
       [store.name, store.address, store.postcode].filter(Boolean).join(' ')
     );
     const compactPostcode = normalizedSearchText(store.postcode ?? '').replace(/ /g, '');
-    if (!haystack.includes(query) && !compactPostcode.includes(query.replace(/ /g, ''))) return false;
+    if (!query.split(' ').every(term => haystack.includes(term)) && !compactPostcode.includes(query.replace(/ /g, ''))) return false;
   }
   if (postcode) {
     const expected = normalizedSearchText(postcode).replace(/ /g, '');
@@ -244,6 +244,9 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
       throw new ProviderInputError('SuperValu Ireland', 'shoppingMode requires both latitude and longitude');
     }
     return { limit, offset, retailerStoreId, fullTextSearch, postcode };
+  }
+  if (retailerStoreId) {
+    throw new ProviderInputError('SuperValu Ireland', 'retailerStoreId cannot be combined with coordinates');
   }
   if (fullTextSearch) {
     throw new ProviderInputError('SuperValu Ireland', 'fullTextSearch cannot be combined with coordinates');
