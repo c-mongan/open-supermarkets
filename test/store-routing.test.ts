@@ -80,6 +80,7 @@ async function helpers(): Promise<void> {
       { limit: '0' },
       { limit: '2.5' },
       { query: '  ' },
+      ...['storeId', 'latitude', 'longitude', 'limit', 'query', 'mode', 'postcode', 'range'].map((key) => ({ [key]: null })),
     ]) {
       assert.throws(() => parseStoreSearchOptions(bad), (e: unknown) =>
         e instanceof StoreRoutingError && e.statusCode === 400, JSON.stringify(bad));
@@ -219,6 +220,16 @@ async function httpRoutes(): Promise<void> {
       assert.equal(events.searches.length, 0, 'searched after a failed selection');
     });
 
+    await test('blank HTTP search fails before store selection or provider loading', async () => {
+      const before = loadCount('fake-stores');
+      const r = await get(port, '/search?provider=fake-stores&q=%20%20&store_id=s1');
+      assert.equal(r.status, 400);
+      assert.match(r.body.error, /query must be a non-empty string/);
+      assert.equal(loadCount('fake-stores'), before);
+      assert.equal(events.selects.length, 0);
+      assert.equal(events.searches.length, 0);
+    });
+
     await test('unsupported operations are 501 before any provider code or network', async () => {
       await offline(async () => {
         for (const route of [
@@ -226,6 +237,7 @@ async function httpRoutes(): Promise<void> {
           '/search?provider=ahorramas&q=milk&store_id=s1',
           '/stores?provider=mercadona',
           '/stores?provider=fake-search',
+          '/favourites?provider=fake-stores',
           '/search?provider=fake-stores-broken&q=milk&store_id=s1',
           '/basket?provider=ahorramas',
           '/add?provider=lidl-ie&id=1',
@@ -350,6 +362,22 @@ async function mcpRoutes(): Promise<void> {
       }
     });
 
+    await test('invalid MCP search queries fail before store selection or provider work', async () => {
+      const before = loadCount('fake-stores');
+      for (const query of [undefined, null, 7, '', '  ']) {
+        const r = await call('grocery_search', { provider: 'fake-stores', store_id: 's1', query });
+        assert.equal(r.isError, true, r.text);
+        assert.match(r.text, /query must be a non-empty string/);
+      }
+      for (const queries of [null, [], ['milk', ' '], [null], [{ query: 5 }]]) {
+        const r = await call('grocery_search_batch', { provider: 'fake-stores', store_id: 's1', queries });
+        assert.equal(r.isError, true, r.text);
+      }
+      assert.equal(loadCount('fake-stores'), before);
+      assert.equal(events.selects.length, 0);
+      assert.equal(events.searches.length, 0);
+    });
+
     await test('bad input and unsupported providers are tool errors, before network', async () => {
       await offline(async () => {
         for (const [tool, args, pattern] of [
@@ -361,6 +389,11 @@ async function mcpRoutes(): Promise<void> {
           ['grocery_search_batch', { provider: 'ahorramas', queries: ['milk'], store_id: 's1' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'mercadona' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'fake-stores', latitude: 53 }, /together/],
+          ['grocery_stores', { provider: 'lidl-ie', latitude: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', longitude: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', limit: null }, /finite number/],
+          ['grocery_stores', { provider: 'fake-stores', query: null }, /non-empty/],
+          ['grocery_stores', { provider: 'fake-stores', shopping_mode: null }, /non-empty/],
           ['grocery_search', { provider: 'fake-stores', query: 'milk', store_id: '' }, /non-empty/],
           ['grocery_search', { provider: 'fake-stores', query: 'milk', store_id: 'bad' }, /unknown store/],
         ] as const) {
@@ -378,13 +411,13 @@ async function mcpRoutes(): Promise<void> {
   }
 }
 
-function runCli(args: string[], input?: string) {
+function runCli(args: string[], input?: string, extraEnv: Record<string, string> = {}) {
   const tsxCli = require.resolve('tsx/cli');
   const helper = path.join(__dirname, 'fixtures', 'store-routing-cli.ts');
   const r = spawnSync(process.execPath, [tsxCli, helper, ...args], {
     input,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: { ...process.env, ...extraEnv, NO_COLOR: '1' },
     timeout: 60_000,
   });
   const marker = r.stderr.lastIndexOf('__ROUTING__ ');
@@ -440,6 +473,45 @@ async function cliRoutes(): Promise<void> {
       assert.match(r.stderr, /--store-id is only supported by search and stores/);
       assert.equal(r.routing.searches.length, 0);
       assert.equal(r.routing.selects.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
+  });
+
+  await test('CLI capability guards refuse unsupported account operations before provider loading', () => {
+    for (const args of [
+      ['basket'], ['add', '1'], ['add', '--batch', '-'], ['remove', '1'], ['update', '1', '2'],
+      ['clear'], ['slots'], ['book', '1'], ['checkout', '--confirm'], ['orders'],
+    ]) {
+      const r = runCli(['--provider', 'fake-search', ...args], '[{"id":"1"}]');
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /does not support/);
+      assert.doesNotMatch(r.stderr, /constructor|not a function/);
+      assert.equal(r.routing.fakeLoads['fake-search'], 0);
+      assert.equal(r.routing.searches.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
+  });
+
+  await test('CLI capability guards preserve supported legacy basket reads', () => {
+    const r = runCli(['--provider', 'sainsburys', 'basket', '--json'], undefined, { TEST_FAKE_LEGACY: '1' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { items: [], total_quantity: 0, total_cost: 0, provider: 'sainsburys' });
+    assert.equal(r.routing.fetchCalls, 0);
+  });
+
+  await test('invalid CLI search input fails before store selection or provider loading', () => {
+    for (const [args, input] of [
+      [['search'], undefined], [['search', '  '], undefined],
+      [['search', '--batch', '-'], '["milk"," "]'],
+      [['search', '--batch', '-'], '[null]'],
+      [['search', '--batch', '-'], '[{"query":5}]'],
+      [['search', '--batch', '-'], '{bad-json}'],
+    ] as Array<[string[], string | undefined]>) {
+      const r = runCli(['--provider', 'fake-stores', '--store-id', 's1', ...args], input);
+      assert.equal(r.status, 1, r.stderr);
+      assert.equal(r.routing.fakeLoads['fake-stores'], 0);
+      assert.equal(r.routing.selects.length, 0);
+      assert.equal(r.routing.searches.length, 0);
       assert.equal(r.routing.fetchCalls, 0);
     }
   });
