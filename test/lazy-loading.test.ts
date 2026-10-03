@@ -256,7 +256,7 @@ console.log('\nregistry/factory parity');
   check('existing manifest entries retain synchronous constructors', () => {
     const broken: string[] = [];
     for (const m of PROVIDERS) {
-      if (m.id === 'lidl-ie' || m.id === 'aldi-ie') continue; // search-only via async search routes
+      if (m.id === 'lidl-ie') continue; // search-only via async search routes
       try {
         ProviderFactory.create(m.id);
       } catch (err: any) {
@@ -270,6 +270,18 @@ console.log('\nregistry/factory parity');
       [],
       `these are in the registry but unreachable via --provider: ${broken.join(', ')}`
     );
+  });
+
+  check('Aldi manifest retains its lazy legacy constructor and truthful capabilities', () => {
+    const manifest = PROVIDERS.find((m: any) => m.id === 'aldi-ie');
+    assert.ok(manifest);
+    assert.deepStrictEqual(manifest.capabilities, ['search', 'stores']);
+    const provider = ProviderFactory.create('aldi-ie');
+    assert.equal(provider.name, 'aldi-ie');
+    assert.equal(typeof provider.search, 'function');
+    assert.equal(typeof provider.listStores, 'function');
+    assert.equal(typeof provider.selectStore, 'function');
+    assert.equal(provider.checkout, undefined);
   });
 
   check('every manifest entry is loadable asynchronously too', async () => {
