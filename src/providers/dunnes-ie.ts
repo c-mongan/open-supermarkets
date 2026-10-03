@@ -95,7 +95,7 @@ function field(record: Record<string, unknown>, name: string): unknown {
 
 function normalizedStoreId(value: unknown): string {
   const storeId = firstString(value);
-  if (!storeId) throw new ProviderInputError('storeId must be a non-empty string');
+  if (!storeId) throw new ProviderInputError('Dunnes Ireland', 'storeId must be a non-empty string');
   return storeId;
 }
 
@@ -157,7 +157,7 @@ function normalizedSearchText(value: string): string {
 function requireSearchableStoreFilter(value: string, name: string): string {
   const filter = requireQuery(value);
   if (!normalizedSearchText(filter)) {
-    throw new ProviderInputError(`${name} must contain searchable characters`);
+    throw new ProviderInputError('Dunnes Ireland', `${name} must contain searchable characters`);
   }
   return filter;
 }
@@ -204,20 +204,20 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
   const coordinatesSpecified =
     options.latitude !== undefined || options.longitude !== undefined;
   if (!coordinatesSpecified) {
-    if (options.range !== undefined) throw new ProviderInputError('range requires both latitude and longitude');
+    if (options.range !== undefined) throw new ProviderInputError('Dunnes Ireland', 'range requires both latitude and longitude');
     if (options.shoppingMode !== undefined) {
-      throw new ProviderInputError('shoppingMode requires both latitude and longitude');
+      throw new ProviderInputError('Dunnes Ireland', 'shoppingMode requires both latitude and longitude');
     }
     return { limit, offset, retailerStoreId, fullTextSearch, postcode };
   }
   if (fullTextSearch) {
-    throw new ProviderInputError('fullTextSearch cannot be combined with coordinates');
+    throw new ProviderInputError('Dunnes Ireland', 'fullTextSearch cannot be combined with coordinates');
   }
   if (postcode) {
-    throw new ProviderInputError('postcode cannot be combined with coordinates');
+    throw new ProviderInputError('Dunnes Ireland', 'postcode cannot be combined with coordinates');
   }
   if (offset > 0) {
-    throw new ProviderInputError('offset cannot be combined with coordinates');
+    throw new ProviderInputError('Dunnes Ireland', 'offset cannot be combined with coordinates');
   }
   if (
     !Number.isFinite(options.latitude) ||
@@ -229,14 +229,14 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
     options.longitude < -180 ||
     options.longitude > 180
   ) {
-    throw new ProviderInputError('latitude and longitude must be valid coordinates');
+    throw new ProviderInputError('Dunnes Ireland', 'latitude and longitude must be valid coordinates');
   }
   const range = options.range ?? DEFAULT_NEARBY_RANGE_KM;
   if (!Number.isFinite(range) || range <= 0) {
-    throw new ProviderInputError('range must be a positive number of kilometres');
+    throw new ProviderInputError('Dunnes Ireland', 'range must be a positive number of kilometres');
   }
   if (options.shoppingMode !== undefined && options.shoppingMode !== 'pickup' && options.shoppingMode !== 'delivery') {
-    throw new ProviderInputError('shoppingMode must be pickup or delivery');
+    throw new ProviderInputError('Dunnes Ireland', 'shoppingMode must be pickup or delivery');
   }
   return {
     limit,
@@ -397,7 +397,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
       selection.retailerStoreId &&
       !stores.some((store) => store.store_id === selection.retailerStoreId)
     ) {
-      throw new ProviderInputError(
+      throw new ProviderInputError('Dunnes Ireland', 
         `Dunnes Ireland retailer store ${selection.retailerStoreId} was not found`
       );
     }
@@ -411,10 +411,10 @@ export class DunnesIrelandProvider implements GroceryProvider {
   private async validateStore(storeId: string): Promise<void> {
     const [store] = await this.listStores({ retailerStoreId: storeId, limit: 1 });
     if (store.currency && store.currency !== 'EUR') {
-      throw new ProviderInputError('Dunnes Ireland requires a EUR-priced store');
+      throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland requires a EUR-priced store');
     }
     if (store.shopping_modes && !store.shopping_modes.includes('delivery')) {
-      throw new ProviderInputError('Dunnes Ireland search requires a store with delivery mode');
+      throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland search requires a store with delivery mode');
     }
   }
 
@@ -431,12 +431,12 @@ export class DunnesIrelandProvider implements GroceryProvider {
   ): Promise<Product[]> {
     const storeId = this.storeId;
     if (!storeId) {
-      throw new ProviderInputError(
+      throw new ProviderInputError('Dunnes Ireland', 
         'Dunnes gateway search is store-scoped. Set DUNNES_IE_STORE_ID or pass storeId.'
       );
     }
     if (options.category !== undefined) {
-      throw new ProviderInputError('Dunnes Ireland category filtering is not supported');
+      throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland category filtering is not supported');
     }
     const normalizedQuery = requireQuery(query);
     const limit = clampLimit(options.limit, 10, 50);
