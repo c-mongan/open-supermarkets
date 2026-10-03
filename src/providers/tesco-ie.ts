@@ -586,11 +586,6 @@ export class TescoIrelandProvider implements GroceryProvider {
     const hydrated: Product[] = [];
     const errors: string[] = [];
     for (const [index, envelope] of envelopes.entries()) {
-      const messages = graphQlMessages(envelope.errors);
-      if (messages.length > 0) {
-        errors.push('GraphQL product hydration failed');
-        continue;
-      }
       const data = asRecord(envelope.data);
       if (!('product' in data) || data.product === undefined) {
         errors.push(`hydration response ${index + 1} missing data.product`);
