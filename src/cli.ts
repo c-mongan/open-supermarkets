@@ -173,7 +173,7 @@ program
   .action(async (query, options, cmd) => {
     try {
       const limit = Number(options.limit);
-      if (!Number.isInteger(limit) || limit < 1) {
+      if (!/^\d+$/.test(options.limit) || !Number.isSafeInteger(limit) || limit < 1) {
         throw new Error(`limit must be a positive integer, got "${options.limit}"`);
       }
       const globals = cmd.optsWithGlobals();

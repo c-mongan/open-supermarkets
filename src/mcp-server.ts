@@ -173,6 +173,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             provider: storeProviderEnum(),
             query: { type: 'string', description: 'Retailer text search, where supported' },
             postcode: { type: 'string', description: 'Retailer postcode filter, where supported' },
+            store_id: { type: 'string', description: 'Exact retailer store id, where supported' },
             latitude: { type: 'number', description: 'Latitude for a nearby search (with longitude)' },
             longitude: { type: 'number', description: 'Longitude for a nearby search (with latitude)' },
             range: { type: 'number', description: 'Nearby search radius in kilometres' },
@@ -458,6 +459,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       range: (args as any).range,
       mode: (args as any).shopping_mode,
       limit: (args as any).limit,
+      storeId: (args as any).store_id,
     }) : undefined;
     if (storeTool) assertStoresSupported(providerName);
     const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
@@ -469,6 +471,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       grocery_slots: 'slots', grocery_book_slot: 'slots',
       grocery_checkout: 'checkout', grocery_orders: 'orders',
     };
+    if (name === 'grocery_book_slot' && providerName === 'ocado') {
+      return textResult('ocado does not support slot booking; only slot reads are available.', true);
+    }
     const requiredCapability = toolCapabilities[name];
     if (requiredCapability && !supports(providerName, requiredCapability)) {
       return textResult(`Provider "${providerName}" does not support ${name}. Missing capability: ${requiredCapability}.`, true);
@@ -503,11 +508,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // ── grocery_providers ──
     if (name === 'grocery_providers') {
       const info = listManifests().map((manifest) => {
-        const authStatus = manifest.auth === 'none' || manifest.auth === 'anonymous'
-          ? 'no login required'
-          : SESSION_PATHS[manifest.id] === undefined
-            ? 'authentication configured by provider'
-            : isLoggedIn(manifest.id) ? 'logged in' : 'not logged in';
+        let authStatus: string;
+        if (manifest.auth === 'none' || manifest.auth === 'anonymous') {
+          authStatus = 'no login required';
+        } else if (SESSION_PATHS[manifest.id] === undefined) {
+          authStatus = 'authentication configured by provider';
+        } else {
+          authStatus = isLoggedIn(manifest.id) ? 'logged in' : 'not logged in';
+        }
         return `- ${manifest.id}: ${authStatus}; auth: ${manifest.auth}; capabilities: ${manifest.capabilities.join(', ')}`;
       });
       return textResult(`Available providers:\n${info.join('\n')}`);
