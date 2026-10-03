@@ -463,6 +463,14 @@ test('supervalu: implicit validation cannot overwrite a concurrent explicit sele
   ]);
 });
 
+test('supervalu: malformed promotional unit text is unknown', async () => {
+  const payload = jsonFixture('supervalu-gateway.json');
+  payload.items[0].pricePerUnit = 'Special offer €1.28/1 L';
+  const provider = new SuperValuIrelandProvider({storeId:'5550',fetcher:queueFetch([jsonFixture('supervalu-stores.json'),payload])});
+  const [product] = await provider.search('milk');
+  assert.equal(product.unit_price, undefined);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);
