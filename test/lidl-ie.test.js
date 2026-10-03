@@ -173,3 +173,23 @@ test('Lidl omits loyalty-only rows while retaining products with regular prices'
   assert.equal(products.length, 2);
   assert.equal(products.some((product) => product.product_uid === 'loyalty-only'), false);
 });
+
+
+test('Lidl prefers the IE regional current price over a different generic price', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'regional', fullTitle: 'Milk', price: { price: 3.29 },
+    regionsPrices: { '1': { currentPrice: { price: 2.79 } } },
+  } } }] };
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 2.79);
+});
+
+test('Lidl rejects a duplicated regional RRP without its generic marker', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'rrp-duplicate', fullTitle: 'Milk', price: { price: 1.50, oldPrice: 2 },
+    regionsPrices: { '1': { currentPrice: {
+      price: 1.50, oldPrice: 2, discount: { discountText: '2 for €3', fromRecommendedPrice: true },
+    } } },
+  } } }] };
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+});

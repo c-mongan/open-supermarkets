@@ -33,10 +33,14 @@ export interface LidlIrelandOptions {
 // can turn malformed values into a plausible shelf price.
 function firstPrice(...values: unknown[]): number | undefined {
   for (const value of values) {
-    const text = typeof value === 'string' ? value.trim() : undefined;
-    const amount = typeof value === 'number' ? value
-      : text && /^(?:€\s*)?\d+(?:[.,]\d{1,2})?$/.test(text)
-        ? Number(text.replace(/^€\s*/, '').replace(',', '.')) : undefined;
+    let amount: number | undefined;
+    if (typeof value === 'number') amount = value;
+    if (typeof value === 'string') {
+      const text = value.trim();
+      if (/^(?:€\s*)?\d+(?:[.,]\d{1,2})?$/.test(text)) {
+        amount = Number(text.replace(/^€\s*/, '').replace(',', '.'));
+      }
+    }
     if (amount !== undefined && Number.isFinite(amount) && amount >= 0) return amount;
   }
   return undefined;
@@ -86,9 +90,15 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   // Offer terms can appear only on the regional price while data.price
   // repeats the discounted amount. A multibuy is not a single-item price.
   const conditional = conditionalPrice(price) || conditionalPrice(currentPrice);
-  const productPrice = conditional
-    ? firstPrice(regularOldPrice(currentPrice), regularOldPrice(price))
-    : firstPrice(price.price, currentPrice.price);
+  let productPrice: number | undefined;
+  if (conditional) {
+    // The generic price can repeat the regional RRP without its marker.
+    if (asRecord(currentPrice.discount).fromRecommendedPrice !== true) {
+      productPrice = firstPrice(regularOldPrice(currentPrice), regularOldPrice(price));
+    }
+  } else {
+    productPrice = firstPrice(currentPrice.price, price.price);
+  }
   const canonicalPath = firstString(data.canonicalUrl, data.url);
   const id = firstString(data.id, data.productId, data.code, canonicalPath);
   if (!id || productPrice === undefined) return undefined;
