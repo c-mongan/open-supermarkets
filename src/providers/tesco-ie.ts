@@ -172,30 +172,55 @@ function packSize(details: unknown): string | undefined {
   return units ? `${value} ${units}` : value;
 }
 
+function optionalRecord(value: unknown, label: string): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ProviderProtocolError('Tesco Ireland', `invalid ${label}: expected an object`);
+  }
+  return asRecord(value);
+}
+
 function seller(node: Record<string, unknown>): Record<string, unknown> {
-  const sellers = asRecord(node.sellers);
-  const first = asRecord(asRecords(sellers.results)[0]);
-  return first;
+  if (node.sellers === undefined || node.sellers === null) return {};
+  const sellers = optionalRecord(node.sellers, 'sellers');
+  if (!Array.isArray(sellers.results) || sellers.results.some(value =>
+    value === null || typeof value !== 'object' || Array.isArray(value))) {
+    throw new ProviderProtocolError('Tesco Ireland', 'invalid sellers.results: expected seller records');
+  }
+  return asRecord(sellers.results[0]);
 }
 
 function promotionFrom(value: unknown): Record<string, unknown> | undefined {
   return asRecords(value)[0];
 }
 
+function firstFieldString(label: string, ...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (value === undefined || value === null) continue;
+    const text = firstString(value);
+    if (!text) throw new ProviderProtocolError('Tesco Ireland', `invalid ${label}: expected a non-empty string`);
+    return text;
+  }
+  return undefined;
+}
+
 function productPrice(node: Record<string, unknown>): number | undefined {
   const firstSeller = seller(node);
-  const sellerPrice = asRecord(firstSeller.price);
-  const directPrice = asRecord(node.price);
-  return firstNumber(
-    sellerPrice.actual,
-    directPrice.actual
-  );
+  const sellerPrice = optionalRecord(firstSeller.price, 'seller price');
+  const directPrice = optionalRecord(node.price, 'direct price');
+  for (const value of [sellerPrice.actual, directPrice.actual]) {
+    if (value === undefined || value === null) continue;
+    const price = firstNumber(value);
+    if (price === undefined) throw new ProviderProtocolError('Tesco Ireland', 'invalid regular price');
+    return price;
+  }
+  return undefined;
 }
 
 function unitPrice(node: Record<string, unknown>): Product['unit_price'] | undefined {
   const firstSeller = seller(node);
-  const sellerPrice = asRecord(firstSeller.price);
-  const directPrice = asRecord(node.price);
+  const sellerPrice = optionalRecord(firstSeller.price, 'seller price');
+  const directPrice = optionalRecord(node.price, 'direct price');
   const directUnit = asRecord(node.unitPrice);
   const price = firstNumber(directUnit.price, sellerPrice.unitPrice, directPrice.unitPrice);
   const measure = firstString(
@@ -217,8 +242,8 @@ function parsedStockState(value: unknown): boolean | null | undefined {
 function mapProduct(node: Record<string, unknown>): Product | undefined {
   // TPNB is available in both search strategies. Prefer it so the same
   // catalogue product keeps one identity across xapi and index hydration.
-  const id = firstString(node.tpnb, node.tpnc, node.id);
-  const title = firstString(node.title, node.name);
+  const id = firstFieldString('product identity', node.tpnb, node.tpnc, node.id);
+  const title = firstFieldString('product name', node.title, node.name);
   const price = productPrice(node);
   if (!id || !title || price === undefined) return undefined;
   const firstSeller = seller(node);
@@ -256,8 +281,8 @@ function graphQlMessages(value: unknown): string[] {
 
 function isProjectionFailure(messages: readonly string[]): boolean {
   return messages.every((message) =>
-    /(?:cannot query field|unknown field)\s+["']?search["']?(?=[\s.]|$)/i.test(message) ||
-    /unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?(?:Query\.)?search\b/i.test(message)
+    /(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?(?=[\s.]|$)/i.test(message) ||
+    /unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search\b/i.test(message)
   );
 }
 
@@ -359,7 +384,7 @@ export class TescoIrelandProvider implements GroceryProvider {
       return undefined;
     }
     const node = asRecord(data.product);
-    const returnedId = byTpnb ? firstString(node.tpnb) : firstString(node.tpnc, node.id);
+    const returnedId = byTpnb ? firstFieldString('TPNB identity', node.tpnb) : firstFieldString('TPNC identity', node.tpnc, node.id);
     if (returnedId !== id) {
       throw new ProviderProtocolError('Tesco Ireland', `${kind.toUpperCase()} lookup returned a different or missing identity`);
     }
@@ -413,7 +438,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     const mappedProducts: Product[] = [];
     for (const result of selectedResults) {
       const node = asRecord(asRecord(result).node);
-      if (!firstString(node.tpnb, node.tpnc, node.id) || !firstString(node.title, node.name)) {
+      if (!firstFieldString('product identity', node.tpnb, node.tpnc, node.id) || !firstFieldString('product name', node.title, node.name)) {
         throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned a malformed product identity or name');
       }
       const product = mapProduct(node);
