@@ -448,7 +448,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = requireLogin(providerName);
+    const loginError = catalogueTool && ANONYMOUS_SEARCH.has(providerName) ? null : requireLogin(providerName);
 
     // ── grocery_search ──
     if (name === 'grocery_search') {
