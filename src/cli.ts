@@ -253,11 +253,11 @@ program
       }
 
       if (options.json) {
-        console.log(JSON.stringify({ products }, null, 2));
+        console.log(JSON.stringify(storeId ? { store_id: storeId, products } : { products }, null, 2));
         return;
       }
 
-      console.log(`\n🔍 Search results from ${provider.name}: "${query}"\n`);
+      console.log(`\n🔍 Search results from ${provider.name}${storeId ? ` store ${storeId}` : ''}: "${query}"\n`);
       printProducts(products);
 
       if (options.enrich) {

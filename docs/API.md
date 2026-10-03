@@ -158,6 +158,14 @@ Input is validated, and the capability is checked from the manifest, before any
 provider code loads or any request is made. Over HTTP, invalid input returns `400`
 and an unsupported operation returns `501`.
 
+Store-scoped CLI JSON includes `store_id` beside `products`; unscoped JSON keeps
+its existing shape. Human-readable search results name the selected store.
+
+`grocery_providers` lists provider-level capabilities. Each MCP tool's schema
+defines its accepted provider IDs; provider capabilities and operation-specific
+limits still apply. The `slots` capability means slot reads; it does not guarantee
+booking. Ocado supports slot reads but not booking.
+
 ---
 
 ## Authentication
