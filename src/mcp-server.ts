@@ -444,10 +444,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Reject before constructing a provider or making a retailer request.
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
     if (catalogueTool) {
-      prepareStoreId(providerName, (args as any).store_id);
       if (name === 'grocery_search') requireSearchQuery((args as any).query);
       else validateBatchSearchQueries((args as any).queries);
       searchLimit((args as any).limit, name === 'grocery_search' ? 10 : 5);
+      prepareStoreId(providerName, (args as any).store_id);
     }
     const storeTool = name === 'grocery_stores';
     const storeOptions = storeTool ? parseStoreSearchOptions({
@@ -502,11 +502,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_providers ──
     if (name === 'grocery_providers') {
-      const info = PROVIDERS.map(p => {
-        const loggedIn = isLoggedIn(p);
-        return `- ${p}: ${loggedIn ? 'logged in' : 'not logged in'}`;
+      const info = listManifests().map((manifest) => {
+        const authStatus = manifest.auth === 'none' || manifest.auth === 'anonymous'
+          ? 'no login required'
+          : SESSION_PATHS[manifest.id] === undefined
+            ? 'authentication configured by provider'
+            : isLoggedIn(manifest.id) ? 'logged in' : 'not logged in';
+        return `- ${manifest.id}: ${authStatus}; auth: ${manifest.auth}; capabilities: ${manifest.capabilities.join(', ')}`;
       });
-      info.push('- lidl-ie: no login required (search only)');
       return textResult(`Available providers:\n${info.join('\n')}`);
     }
 
