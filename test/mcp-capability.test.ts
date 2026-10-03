@@ -13,6 +13,7 @@ async function main() {
   const originalConnect = Server.prototype.connect;
   const originalHuSearch = TescoHuProvider.prototype.search;
   const originalLidlSearch = LidlIrelandProvider.prototype.search;
+  const originalReadFile = fs.readFileSync;
   const originalFetch = globalThis.fetch;
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   let server: Server | undefined;
@@ -30,19 +31,26 @@ async function main() {
       connection = originalConnect.call(this, serverTransport);
       return connection;
     };
+    fs.readFileSync = ((path: fs.PathOrFileDescriptor, ...options: any[]) => {
+      if (String(path).endsWith('/.tesco/staples.json')) {
+        return JSON.stringify([{ productId: '1', name: 'Test milk', avgQty: 1, frequency: 1 }]);
+      }
+      if (String(path).endsWith('/.tesco/session.json')) return '{}';
+      return (originalReadFile as any)(path, ...options);
+    }) as typeof fs.readFileSync;
     require('../src/mcp-server');
     await connection;
     await client.connect(clientTransport);
     for (const name of ['grocery_login', 'grocery_favourites', 'grocery_favourites_search',
-      'grocery_categories', 'grocery_browse', 'grocery_basket', 'grocery_add',
-      'grocery_remove', 'grocery_update', 'grocery_clear', 'grocery_slots',
+      'grocery_categories', 'grocery_browse', 'grocery_basket_view', 'grocery_basket_add',
+      'grocery_basket_remove', 'grocery_basket_update', 'grocery_basket_clear', 'grocery_slots',
       'grocery_book_slot', 'grocery_checkout', 'grocery_orders', 'grocery_basket_add_batch']) {
       const result = await client.callTool({ name, arguments: { provider: 'lidl-ie', items: [{ id: '1' }] } });
       assert.equal(result.isError, true, name);
       assert.match(JSON.stringify(result.content), /does not support/, name);
       assert.doesNotMatch(JSON.stringify(result.content), /constructor|Unexpected retailer/, name);
     }
-    for (const name of ['grocery_basket', 'grocery_basket_add_batch']) {
+    for (const name of ['grocery_basket_view', 'grocery_basket_add_batch']) {
       const result = await client.callTool({ name, arguments: { provider: 'tesco-hu', items: [{ id: '1' }] } });
       assert.equal(result.isError, true, name);
       assert.match(JSON.stringify(result.content), /Not logged in to tesco-hu/, name);
@@ -57,9 +65,33 @@ async function main() {
       }
     }
     assert.equal(searchCalls, 4);
-    console.log('  ✓ MCP search-only operations, login gates and anonymous catalogue search');
+    for (const [name, provider] of [['ocado_regulars', 'ocado'], ['tesco_staples', 'tesco']]) {
+      const result = await client.callTool({ name, arguments: {} });
+      assert.equal(result.isError, true, name);
+      assert.match(JSON.stringify(result.content), new RegExp(`Not logged in to ${provider}`));
+      assert.doesNotMatch(JSON.stringify(result.content), /sainsburys|Unexpected legacy constructor/);
+    }
+    // Each provider-specific tool works with only its own fake session.
+    let regularsCalls = 0;
+    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.ocado/session.json') ||
+      (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
+    ProviderFactory.create = ((name: string) => {
+      assert.equal(name, 'ocado');
+      return { getRegulars: async () => { regularsCalls++; return []; } };
+    }) as typeof ProviderFactory.create;
+    const regulars = await client.callTool({ name: 'ocado_regulars', arguments: {} });
+    assert.notEqual(regulars.isError, true, JSON.stringify(regulars.content));
+    assert.equal(regularsCalls, 1);
+    fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.tesco/session.json') ||
+      String(path).endsWith('/.tesco/staples.json') ||
+      (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
+    const stapleResult = await client.callTool({ name: 'tesco_staples', arguments: { action: 'view' } });
+    assert.notEqual(stapleResult.isError, true, JSON.stringify(stapleResult.content));
+    assert.match(JSON.stringify(stapleResult.content), /Test milk/);
+    console.log('  ✓ MCP catalogue capabilities and provider-specific login gates');
   } finally {
     fs.existsSync = originalExists;
+    fs.readFileSync = originalReadFile;
     ProviderFactory.create = originalCreate;
     Server.prototype.connect = originalConnect;
     TescoHuProvider.prototype.search = originalHuSearch;
