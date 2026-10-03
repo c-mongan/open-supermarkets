@@ -145,3 +145,19 @@ test('Lidl retains valid rows when another row has an invalid price', async () =
   assert.equal(products.length, 2);
   assert.equal(products[0].retail_price.price, 2.25);
 });
+
+test('Lidl matches complete stock labels without treating negation as available', async () => {
+  for (const [text, expected] of [
+    ['Not in stock', false], ['No longer in stock', false], ['Out of stock', false],
+    ['Sold out', false], ['Unavailable', false], ['IN STOCK', true],
+    ['In stock.', true], ['Back in stock soon', null], ['Not currently in stock', null],
+    ['Usually in stock', null], ['Not unavailable', null], ['Not sold out', null],
+  ]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'stock', fullTitle: 'Milk', price: { price: 1.50 },
+      stockAvailability: { badgeInfo: { badges: [{ text }] } },
+    } } }] };
+    const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+    assert.equal(product.in_stock, expected, text);
+  }
+});

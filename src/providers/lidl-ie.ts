@@ -59,9 +59,11 @@ function stockState(data: Record<string, unknown>): boolean | null {
   const availability = asRecord(data.stockAvailability);
   const badgeInfo = asRecord(availability.badgeInfo);
   const signals = asRecords(badgeInfo.badges).flatMap((badge) => {
-    const text = firstString(badge.text, badge.label) ?? '';
-    if (/sold out|out of stock|unavailable/i.test(text)) return [false];
-    if (/\bin stock\b/i.test(text)) return [true];
+    const text = (firstString(badge.text, badge.label) ?? '').trim();
+    // Match complete status labels. A sentence such as 'Not in stock' or
+    // 'Back in stock soon' must never become a positive stock signal.
+    if (/^(?:sold out|out of stock|unavailable|not in stock|no longer in stock)[.!]?$/i.test(text)) return [false];
+    if (/^in stock[.!]?$/i.test(text)) return [true];
     return [];
   });
   return explicitBooleanState(...signals);
