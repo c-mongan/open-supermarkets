@@ -253,7 +253,7 @@ function graphQlMessages(value: unknown): string[] {
 }
 
 function isProjectionFailure(messages: readonly string[]): boolean {
-  return messages.some((message) =>
+  return messages.every((message) =>
     /cannot query field|unknown field|unknown argument/i.test(message)
   );
 }
@@ -382,16 +382,23 @@ export class TescoIrelandProvider implements GroceryProvider {
     }));
     const envelopes = await this.executeBatch(operations, { allowProjectionErrors: true });
 
+    // Examine the complete batch before considering fallback. A projection
+    // failure must not hide authentication or rate-limit errors on another page.
+    const messages = envelopes.flatMap(envelope => graphQlMessages(envelope.errors));
+    if (messages.length > 0) {
+      for (const envelope of envelopes) {
+        if (graphQlMessages(envelope.errors).length === 0 &&
+            !Array.isArray(asRecord(asRecord(envelope.data).search).results)) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned no results array');
+        }
+      }
+      if (isProjectionFailure(messages)) {
+        throw new TescoSearchProjectionError(messages.slice(0, 3).join('; '));
+      }
+      throw new ProviderProtocolError('Tesco Ireland', messages.slice(0, 3).join('; '));
+    }
     const results: unknown[] = [];
     for (const envelope of envelopes) {
-      const messages = graphQlMessages(envelope.errors);
-      if (messages.length > 0) {
-        if (isProjectionFailure(messages)) {
-          throw new TescoSearchProjectionError(messages.slice(0, 3).join('; '));
-        }
-        throw new ProviderProtocolError('Tesco Ireland', messages.slice(0, 3).join('; '));
-      }
-
       const data = asRecord(envelope.data);
       const search = asRecord(data.search);
       if (!Array.isArray(search.results)) {
@@ -490,14 +497,27 @@ export class TescoIrelandProvider implements GroceryProvider {
         continue;
       }
       const data = asRecord(envelope.data);
-      const node = asRecord(data.product);
-      const product = mapProduct(node);
-      if (product && product.product_uid === tpnbs[index]) {
-        hydrated.push(product);
-      } else if (!('product' in data) || data.product === null || data.product === undefined) {
+      if (!('product' in data) || data.product === undefined) {
         errors.push(`hydration response ${index + 1} missing data.product`);
+        continue;
+      }
+      // A null product is an explicit catalogue miss, unlike malformed data.
+      if (data.product === null) continue;
+      const node = asRecord(data.product);
+      if (firstString(node.tpnb) !== tpnbs[index] || !firstString(node.title, node.name)) {
+        errors.push(`hydration response ${index + 1} contained a missing or mismatched identity/name`);
+        continue;
+      }
+      const product = mapProduct(node);
+      if (product) {
+        hydrated.push(product);
       } else {
-        errors.push(`hydration response ${index + 1} contained no valid priced product`);
+        const regularPrice = asRecord(seller(node).price).actual ?? asRecord(node.price).actual;
+        // An ordinary unpriced catalogue row cannot be emitted, but need not
+        // discard other valid products. Invalid supplied prices remain errors.
+        if (regularPrice !== undefined && regularPrice !== null) {
+          errors.push(`hydration response ${index + 1} contained an invalid regular price`);
+        }
       }
     }
     if (errors.length > 0 || hydrated.length === 0) {

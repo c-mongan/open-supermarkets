@@ -553,6 +553,42 @@ test('tesco: generic validation errors do not allow projection fallback', async 
   assert.equal(calls.length,1);
 });
 
+test('tesco: mixed projection and authentication errors cannot allow fallback', async () => {
+  for(const envelopes of [
+    [{errors:[{message:'Cannot query field search'},{message:'Unauthenticated'}]}],
+    [{errors:[{message:'Cannot query field search'}]},{errors:[{message:'Rate limited'}]}],
+    [{errors:[{message:'Cannot query field search'}]},{data:{}}],
+  ]) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([envelopes],calls)});
+    await rejects(()=>provider.search('milk',{limit:2,offset:envelopes.length===2?1:0}), /Unauthenticated|Rate limited|no results array/);
+    assert.equal(calls.length,1);
+  }
+});
+
+test('tesco: null or ordinary unpriced hydration rows do not discard valid products', async () => {
+  for(const missing of [null,{tpnb:'7100001',title:'Unpriced Milk'}]) {
+    const batch=jsonFixture('tesco-hydration.json');
+    batch[0]={data:{product:missing}};
+    const provider=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([jsonFixture('tesco-index-search.json'),batch])});
+    const products=await provider.search('milk');
+    assert.deepEqual(products.map(p=>p.product_uid), ['7100002']);
+  }
+});
+
+test('tesco: all explicitly unavailable hydration rows fail rather than appear empty', async () => {
+  const provider=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([jsonFixture('tesco-index-search.json'),[{data:{product:null}},{data:{product:null}}]])});
+  await rejects(()=>provider.search('milk'), /hydration failed/);
+});
+
+test('tesco: malformed or invalidly priced hydration rows are not skipped silently', async () => {
+  for(const malformed of [{},{tpnb:'7100001',title:'Milk',price:{actual:'bad2'}}]) {
+    const batch=jsonFixture('tesco-hydration.json');batch[0]={data:{product:malformed}};
+    const provider=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([jsonFixture('tesco-index-search.json'),batch])});
+    await rejects(()=>provider.search('milk'), /hydration failed/);
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
