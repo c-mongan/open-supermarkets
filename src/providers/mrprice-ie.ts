@@ -42,13 +42,15 @@ export interface MrPriceIrelandOptions {
 }
 
 function shopifyMoney(value: unknown, cents = false): number | undefined {
-  const parsed = typeof value === 'number' ? value :
-    typeof value === 'string' && /^\d+(?:[.,]\d+)?$/.test(value.trim())
-      ? Number(value.trim().replace(',', '.')) : undefined;
+  let parsed: number | undefined;
+  if (typeof value === 'number') parsed = value;
+  else if (typeof value === 'string' && /^\d+(?:[.,]\d+)?$/.test(value.trim())) {
+    parsed = Number(value.trim().replace(',', '.'));
+  }
   if (parsed === undefined || !Number.isFinite(parsed) || parsed < 0) return undefined;
-
   // Predictive search uses major currency units. HTML data-price uses cents.
-  return cents ? (Number.isInteger(parsed) ? parsed / 100 : undefined) : parsed;
+  if (cents) return Number.isInteger(parsed) ? parsed / 100 : undefined;
+  return parsed;
 }
 
 function mapPredictiveProduct(
@@ -175,7 +177,8 @@ function parseHtmlProducts(
   html: string,
   baseUrl: string,
   limit: number,
-  offset: number
+  offset: number,
+  query: string
 ): Product[] {
   const grid = extractSearchGrid(html);
   const starts = [...grid.matchAll(/<[^>]+>/g)]
@@ -193,7 +196,18 @@ function parseHtmlProducts(
       'HTML product-card collection contained no valid products'
     );
   }
-  const hasNextPage = /href=["'][^"']*[?&]page=(?:[2-9]|[1-9]\d+)[^"']*["']/i.test(grid);
+  const hasNextPage = [...html.matchAll(/<a\b[^>]*>/gi)].some(match => {
+    const href = extractAttribute(match[0], 'href');
+    if (!href) return false;
+    try {
+      const link = new URL(href.replace(/&amp;|&#0*38;|&#x0*26;/gi, '&'), baseUrl);
+      const page = link.searchParams.get('page');
+      return link.pathname === '/search' && link.searchParams.get('q') === query &&
+        page !== null && /^\d+$/.test(page) && Number(page) > 1;
+    } catch {
+      return false;
+    }
+  });
   if (hasNextPage && offset + limit > products.length) {
     throw new ProviderInputError('Mr Price Ireland', 'requested window exceeds the first HTML search page; further pages are unsupported');
   }
@@ -279,6 +293,6 @@ export class MrPriceIrelandProvider implements GroceryProvider {
     if (!response.ok) {
       throw new ProviderHttpError('Mr Price Ireland', response.status);
     }
-    return parseHtmlProducts(html, this.baseUrl, limit, offset);
+    return parseHtmlProducts(html, this.baseUrl, limit, offset, normalizedQuery);
   }
 }

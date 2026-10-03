@@ -323,6 +323,17 @@ test('mrprice: rejects fractional HTML cents', async () => {
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item'), /no valid products/);
 });
 
+
+test('mrprice: recognizes escaped pagination outside the result grid', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=milk&amp;page=2">Next</a>';
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2}), /further pages are unsupported/);
+});
+
+test('mrprice: ignores pagination for unrelated searches', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=bread&amp;page=2">Next bread</a>';
+  assert.equal((await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2})).length,1);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
