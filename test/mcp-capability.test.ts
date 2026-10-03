@@ -90,13 +90,18 @@ async function main() {
     }) as typeof ProviderFactory.create;
     const regulars = await client.callTool({ name: 'ocado_regulars', arguments: {} });
     assert.notEqual(regulars.isError, true, JSON.stringify(regulars.content));
-    assert.equal(regularsCalls, 1);
+    const regularsExtraProvider = await client.callTool({ name: 'ocado_regulars', arguments: { provider: 'lidl-ie' } });
+    assert.notEqual(regularsExtraProvider.isError, true, JSON.stringify(regularsExtraProvider.content));
+    assert.equal(regularsCalls, 2);
     fs.existsSync = ((path: fs.PathLike) => String(path).endsWith('/.tesco/session.json') ||
       String(path).endsWith('/.tesco/staples.json') ||
       (!String(path).endsWith('/session.json') && originalExists(path))) as typeof fs.existsSync;
     const stapleResult = await client.callTool({ name: 'tesco_staples', arguments: { action: 'view' } });
     assert.notEqual(stapleResult.isError, true, JSON.stringify(stapleResult.content));
     assert.match(JSON.stringify(stapleResult.content), /Test milk/);
+    const staplesExtraProvider = await client.callTool({ name: 'tesco_staples', arguments: { action: 'view', provider: 'lidl-ie' } });
+    assert.notEqual(staplesExtraProvider.isError, true, JSON.stringify(staplesExtraProvider.content));
+    assert.match(JSON.stringify(staplesExtraProvider.content), /Test milk/);
     console.log('  ✓ MCP catalogue capabilities and provider-specific login gates');
   } finally {
     fs.existsSync = originalExists;

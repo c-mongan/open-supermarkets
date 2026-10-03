@@ -3,7 +3,7 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { ProviderFactory, ProviderName } from './providers';
-import { createProvider, getManifest, supports } from './providers/registry';
+import { createProvider, supports } from './providers/registry';
 import type { FullGroceryProvider, SearchOptions } from './providers/types';
 
 type FavouritesProvider = FullGroceryProvider & {
@@ -103,7 +103,7 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   const providerId = url.searchParams.get('provider') || defaultProvider;
   if ((basketPaths.includes(url.pathname) && !supports(providerId, 'basket')) ||
       (favouritePaths.includes(url.pathname) &&
-       getManifest(providerId).capabilities.every(capability => capability === 'search'))) {
+       providerId !== 'sainsburys' && providerId !== 'ocado')) {
     return sendJson(res, 501, { error: `Provider "${providerId}" does not support ${url.pathname}` });
   }
   const provider = getProvider(url);
