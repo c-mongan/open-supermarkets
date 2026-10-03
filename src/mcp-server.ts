@@ -367,12 +367,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Search-only providers cannot use the legacy authenticated operations.
     // Reject before constructing a provider or making a retailer request.
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
+    const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
-    if (!catalogueTool && !globalTool &&
+    if (!catalogueTool && !globalTool && !providerSpecificTool &&
         getManifest(providerName).capabilities.every(capability => capability === 'search')) {
       return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);
     }
-    if (!globalTool && name !== 'grocery_login' &&
+    if (!globalTool && !providerSpecificTool && name !== 'grocery_login' &&
         (!catalogueTool || !ANONYMOUS_SEARCH.has(providerName))) {
       const loginError = requireLogin(providerName);
       if (loginError) return textResult(loginError, true);
@@ -564,6 +565,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── ocado_regulars ──
     if (name === 'ocado_regulars') {
+      const ocadoLoginError = requireLogin('ocado');
+      if (ocadoLoginError) return textResult(ocadoLoginError, true);
       const provider: any = getProvider('ocado');
 
       if (typeof provider.getRegulars !== 'function') {
