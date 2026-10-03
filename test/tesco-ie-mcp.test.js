@@ -1,27 +1,44 @@
 'use strict';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
+const https = require('node:https');
 const {Client} = require('@modelcontextprotocol/sdk/client/index.js');
 const {Server} = require('@modelcontextprotocol/sdk/server/index.js');
 const {InMemoryTransport} = require('@modelcontextprotocol/sdk/inMemory.js');
-const {TescoIrelandProvider} = require('../dist/providers/tesco-ie');
 const {getManifest} = require('../dist/providers/registry');
 
 async function main() {
   const originalConnect = Server.prototype.connect;
-  const originalSearch = TescoIrelandProvider.prototype.search;
+  const manifest = getManifest('tesco-ie');
+  const originalLoad = manifest.load;
   const originalFetch = globalThis.fetch;
+  const originalHttpRequest = http.request;
+  const originalHttpsRequest = https.request;
   const originalExists = fs.existsSync;
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({name:'tesco-ie-capability-regression',version:'1.0.0'});
-  let server, connection, calls = 0;
+  let server, connection, calls = 0, networkCalls = 0, loads = 0;
   try {
     assert.equal(getManifest('tesco-ie').auth, 'anonymous');
     fs.existsSync = path => String(path).endsWith('/session.json') ? false : originalExists(path);
-    globalThis.fetch = async () => { throw new Error('Unexpected retailer request'); };
-    TescoIrelandProvider.prototype.search = async () => {
-      calls++;
-      return [{product_uid:'fixture-product',name:'Milk',retail_price:{price:1.15},currency:'EUR',provider:'tesco-ie',in_stock:null}];
+    const rejectNetwork = () => {
+      networkCalls++;
+      throw new Error('Unexpected retailer request');
+    };
+    globalThis.fetch = async () => rejectNetwork();
+    http.request = rejectNetwork;
+    https.request = rejectNetwork;
+    // Intercept the loader used by createProvider, not a separately imported
+    // constructor whose identity can differ under Node's ESM/CJS loaders.
+    manifest.load = async () => {
+      loads++;
+      return class FakeTescoProvider {
+        async search() {
+          calls++;
+          return [{product_uid:'fixture-product',name:'Milk',retail_price:{price:1.15},currency:'EUR',provider:'tesco-ie',in_stock:null}];
+        }
+      };
     };
     Server.prototype.connect = function() {
       server = this;
@@ -45,11 +62,15 @@ async function main() {
       assert.match(JSON.stringify(result.content),/does not support/i,name);
     }
     assert.equal(calls,2);
+    assert.ok(loads > 0, 'MCP used the intercepted registry loader');
+    assert.equal(networkCalls,0, 'Offline MCP regression made no retailer requests');
     console.log('Tesco MCP regression passed: anonymous search/schema/batch and unsupported operation guards');
   } finally {
     Server.prototype.connect = originalConnect;
-    TescoIrelandProvider.prototype.search = originalSearch;
+    manifest.load = originalLoad;
     globalThis.fetch = originalFetch;
+    http.request = originalHttpRequest;
+    https.request = originalHttpsRequest;
     fs.existsSync = originalExists;
     await client.close();
     if(server) await server.close();
