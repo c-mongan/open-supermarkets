@@ -525,6 +525,51 @@ test('supervalu: store pagination counts malformed source entries for its cursor
   assert.equal(new URL(calls[1].url).searchParams.get('Skip'), '2');
 });
 
+test('supervalu: invalid gateway coordinates remain unknown', async () => {
+  for (const location of [{latitude:999,longitude:0}, {latitude:0,longitude:-181}]) {
+    const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'A',location}]}])});
+    assert.equal((await provider.listStores())[0].location, undefined);
+  }
+});
+
+test('supervalu: per-search explicit store scope cannot silently use another store', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({storeId:'A',fetcher:queueFetch([
+    {items:[{retailerStoreId:'B',name:'B'}]},jsonFixture('supervalu-gateway.json')
+  ], calls)});
+  await provider.search('milk',{storeId:'B'});
+  assert.equal(new URL(calls[1].url).pathname, '/api/stores/B/search');
+});
+
+test('supervalu: fetch and body deadlines cover search and store pages', async () => {
+  for (const bodyStall of [false,true]) {
+    const calls = [];
+    const hanging = async (input, init) => {
+      calls.push(init.signal);
+      return bodyStall ? {ok:true,status:200,text:()=>new Promise(()=>{})} : new Promise(()=>{});
+    };
+    const provider = new SuperValuIrelandProvider({requestTimeoutMs:10,fetcher:hanging});
+    await rejects(() => provider.listStores(), /timed out/);
+    assert.equal(calls[0].aborted, true);
+    const search = new SuperValuIrelandProvider({requestTimeoutMs:10,fetcher:async (input,init)=>
+      new URL(input).pathname === '/api/stores' ? response({items:[{retailerStoreId:'A',name:'A'}]}) : hanging(input,init)
+    });
+    await search.selectStore('A');
+    await rejects(() => search.search('milk'), /timed out/);
+  }
+});
+
+test('supervalu: store pagination has an overall deadline', async () => {
+  let requests = 0;
+  const provider = new SuperValuIrelandProvider({requestTimeoutMs:100,storeLookupTimeoutMs:15,fetcher:async () => {
+    requests++;
+    await new Promise(resolve=>setTimeout(resolve,10));
+    return response({total:10,items:[{retailerStoreId:String(requests),name:'Cork'}]});
+  }});
+  await rejects(() => provider.listStores({fullTextSearch:'Dublin'}), /timed out/);
+  assert.ok(requests <= 2);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);

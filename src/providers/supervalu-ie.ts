@@ -63,6 +63,8 @@ export interface SuperValuIrelandOptions {
   cookieHeader?: string;
   fetcher?: FetchLike;
   gatewayBase?: string;
+  requestTimeoutMs?: number;
+  storeLookupTimeoutMs?: number;
 }
 
 function productPrice(...values: unknown[]): number | undefined {
@@ -172,7 +174,8 @@ function gatewayStore(item: Record<string, unknown>): Store | undefined {
     postcode: firstString(field(item, 'postCode'), field(item, 'postcode'))?.toUpperCase(),
     address: address || undefined,
     location:
-      latitude !== undefined && longitude !== undefined
+      latitude !== undefined && longitude !== undefined &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
         ? { latitude, longitude }
         : undefined,
     shopping_modes: normalizedModes(field(item, 'shoppingModes')),
@@ -293,6 +296,8 @@ export class SuperValuIrelandProvider implements GroceryProvider {
   readonly name = 'supervalu-ie';
   private storeId?: string;
   private verifiedStoreId?: string;
+  private readonly requestTimeoutMs: number;
+  private readonly storeLookupTimeoutMs: number;
   private readonly cookieHeader?: string;
   private readonly fetcher: FetchLike;
   private readonly gatewayBase: string;
@@ -306,10 +311,16 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       options.cookieHeader ?? env('SUPERMARKET_SUPERVALU_COOKIE_HEADER');
     this.fetcher = options.fetcher ?? fetch;
     this.gatewayBase = options.gatewayBase ?? GATEWAY_BASE;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 10000;
+    this.storeLookupTimeoutMs = options.storeLookupTimeoutMs ?? 30000;
+    for (const value of [this.requestTimeoutMs, this.storeLookupTimeoutMs]) {
+      if (!Number.isSafeInteger(value) || value <= 0) throw new ProviderInputError('SuperValu Ireland', 'timeout must be a positive integer');
+    }
   }
 
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
-    if (!this.storeId) {
+    const requestedStoreId = options.storeId ?? this.storeId;
+    if (!requestedStoreId) {
       throw new ProviderInputError('SuperValu Ireland',
         'SuperValu Ireland requires a store id. Set SUPERMARKET_SUPERVALU_STORE_ID.'
       );
@@ -318,7 +329,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const normalizedQuery = requireQuery(query);
     const limit = clampLimit(options.limit, 10, 50);
     const offset = clampOffset(options.offset);
-    const selectedStoreId = normalizedStoreId(this.storeId);
+    const selectedStoreId = normalizedStoreId(requestedStoreId);
     if (this.verifiedStoreId !== selectedStoreId) {
       await this.validateSelectedStore(selectedStoreId);
       if (this.storeId === selectedStoreId) this.verifiedStoreId = selectedStoreId;
@@ -338,10 +349,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     };
     if (this.cookieHeader) headers.Cookie = this.cookieHeader;
 
-    const payload = await jsonResponse<unknown>(
-      await this.fetcher(url, { headers }),
-      'SuperValu Ireland'
-    );
+    const payload = await this.requestJson(url, { headers }, 'SuperValu Ireland');
     const root = asRecord(payload);
     const branches = ['items', 'products', 'results'] as const;
     const presentBranches = branches.filter((candidate) =>
@@ -408,6 +416,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       url.searchParams.set('shoppingModeId', SHOPPING_MODE_IDS[selection.shoppingMode!]);
     }
 
+    const deadline = Date.now() + this.storeLookupTimeoutMs;
     const stores: Store[] = [];
     const seenPages = new Set<string>();
     const seenStoreIds = new Set<string>();
@@ -426,10 +435,9 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       if (selection.latitude === undefined && localFilter && skip > 0) {
         pageUrl.searchParams.set('Skip', String(skip));
       }
-      const payload = await jsonResponse<unknown>(
-        await this.fetcher(pageUrl, { headers: { Accept: 'application/json' } }),
-        'SuperValu Ireland stores'
-      );
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('SuperValu Ireland stores lookup timed out');
+      const payload = await this.requestJson(pageUrl, { headers: { Accept: 'application/json' } }, 'SuperValu Ireland stores', Math.min(this.requestTimeoutMs, remaining));
       const root = asRecord(payload);
       const source = field(root, 'items');
       const rows = requireRecordArray(source, 'SuperValu Ireland stores', 'items collection');
@@ -520,6 +528,25 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     );
     const offset = localFilter || selection.latitude !== undefined ? selection.offset : 0;
     return filtered.slice(offset, offset + selection.limit);
+  }
+
+  private async requestJson(url: URL, init: RequestInit, provider: string, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`${provider} request timed out after ${timeoutMs} ms`));
+        controller.abort();
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => jsonResponse<unknown>(await this.fetcher(url, {...init, signal: controller.signal}), provider))(),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async validateSelectedStore(storeId: string): Promise<void> {
