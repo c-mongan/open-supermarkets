@@ -2,7 +2,7 @@
 
 Anonymous catalogue search uses the public SuperValu storefront gateway. Prices and availability belong to the selected retailer store. There is no default store or national price claim.
 
-Discover a store, then select its retailer-owned ID. `SUPERMARKET_SUPERVALU_STORE_ID` (or `SUPERVALU_STORE_ID`) can supply an explicit store; search validates it before use.
+Discover a store, then pass its retailer-owned ID with CLI `--store-id` or HTTP/MCP `store_id`. Store environment variables do not select a store. Direct callers can pass constructor `storeId`, call `selectStore`, or set search `storeId`; search validates the explicit selection before use.
 
 ```sh
 supermarket stores --provider supervalu-ie --store-id 76

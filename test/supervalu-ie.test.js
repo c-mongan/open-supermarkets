@@ -56,7 +56,7 @@ async function rejects(fn, pattern) {
 
 test('supervalu: refuses to present a default store as national pricing', async () => {
   const provider = new SuperValuIrelandProvider({ fetcher: queueFetch([]) });
-  await rejects(() => provider.search('milk'), /requires a store id/);
+  await rejects(() => provider.search('milk'), /requires an explicit store id/);
 });
 
 test('supervalu: lists and normalizes anonymous stores by retailer store id', async () => {
@@ -324,7 +324,7 @@ test('supervalu: rejects an unverified store id and a mode without coordinates',
     fetcher: queueFetch([jsonFixture('supervalu-stores.json')], calls),
   });
   await rejects(() => provider.selectStore('999'), /retailer store 999 was not found/);
-  await rejects(() => provider.search('milk'), /requires a store id/);
+  await rejects(() => provider.search('milk'), /requires an explicit store id/);
   await rejects(() => provider.listStores({ shoppingMode: 'pickup' }), /requires both latitude/);
   assert.equal(calls.length, 1);
 });
@@ -486,7 +486,7 @@ test('supervalu: selection rejects known currency or inactive metadata, preservi
   for (const metadata of [{currency:'GBP'}, {status:'Inactive'}]) {
     const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'Store A',...metadata}]}])});
     await rejects(() => provider.selectStore('A'), /unsupported currency|not active/);
-    await rejects(() => provider.search('milk'), /requires a store id/);
+    await rejects(() => provider.search('milk'), /requires an explicit store id/);
   }
   const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'Store A'}]},jsonFixture('supervalu-gateway.json')])});
   await provider.selectStore('A');
@@ -597,6 +597,28 @@ test('supervalu: valid alternate unit price survives a malformed primary value',
   payload.items[0].unitPriceText = '€1.28/1 L';
   const provider = new SuperValuIrelandProvider({storeId:'5550',fetcher:queueFetch([jsonFixture('supervalu-stores.json'),payload])});
   assert.deepEqual((await provider.search('milk'))[0].unit_price, {price:1.28,measure:'1 L'});
+});
+
+test('supervalu: store environment variables cannot enable unscoped public HTTP search', async () => {
+  const prior = [process.env.SUPERMARKET_SUPERVALU_STORE_ID, process.env.SUPERVALU_STORE_ID];
+  process.env.SUPERMARKET_SUPERVALU_STORE_ID = '76';
+  process.env.SUPERVALU_STORE_ID = '5550';
+  const {createHttpServer} = require('../src/http-server.ts');
+  const server = createHttpServer();
+  try {
+    await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
+    const address = server.address();
+    const result = await fetch(`http://127.0.0.1:${address.port}/search?provider=supervalu-ie&q=milk`);
+    assert.equal(result.status, 400);
+    assert.match((await result.json()).error, /requires an explicit store id/);
+    const provider = new SuperValuIrelandProvider({fetcher:queueFetch([])});
+    await rejects(() => provider.search('milk'), /requires an explicit store id/);
+  } finally {
+    await new Promise((resolve,reject) => server.close(error => error ? reject(error) : resolve()));
+    for (const [index,name] of ['SUPERMARKET_SUPERVALU_STORE_ID','SUPERVALU_STORE_ID'].entries()) {
+      if (prior[index] === undefined) delete process.env[name]; else process.env[name] = prior[index];
+    }
+  }
 });
 
 (async () => {

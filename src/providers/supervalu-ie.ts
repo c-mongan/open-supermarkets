@@ -301,10 +301,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
   private readonly gatewayBase: string;
 
   constructor(options: SuperValuIrelandOptions = {}) {
-    this.storeId =
-      options.storeId ??
-      env('SUPERMARKET_SUPERVALU_STORE_ID') ??
-      env('SUPERVALU_STORE_ID');
+    this.storeId = options.storeId;
     this.cookieHeader =
       options.cookieHeader ?? env('SUPERMARKET_SUPERVALU_COOKIE_HEADER');
     this.fetcher = options.fetcher ?? fetch;
@@ -320,7 +317,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const requestedStoreId = options.storeId ?? this.storeId;
     if (!requestedStoreId) {
       throw new ProviderInputError('SuperValu Ireland',
-        'SuperValu Ireland requires a store id. Set SUPERMARKET_SUPERVALU_STORE_ID.'
+        'SuperValu Ireland requires an explicit store id. Use --store-id or store_id.'
       );
     }
     if (options.category !== undefined) throw new ProviderInputError('SuperValu Ireland', 'SuperValu Ireland does not support category filters');
