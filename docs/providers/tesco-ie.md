@@ -40,7 +40,11 @@ Lookup of `81245658` returned the same TPNB and price. These are catalogue price
 no store was selected and store availability was not verified. Dedicated offline
 fixtures use fake IDs and cover pagination, identity, errors, the fallback boundary,
 regular-price validation, and unknown stock. Reproduce them with
-`node test/tesco-ie.test.js` after the build.
+`node test/tesco-ie.test.js` after the build. The offline real MCP client regression
+is `node test/tesco-ie-mcp.test.js`; it checks anonymous single/batch search, the
+advertised schema, and unsupported-operation guards. CLI, loopback HTTP, and real
+MCP search were also compared live after store-routing integration: product IDs,
+regular EUR prices, names, sizes, and stock states matched.
 
 Store discovery, category filters, account prices, login, basket, delivery slots,
 orders, and checkout are unsupported. No spending request is sent.

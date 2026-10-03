@@ -61,7 +61,7 @@ export const PROVIDERS: ProviderManifest[] = [
     label: 'Tesco Ireland',
     country: 'IE',
     capabilities: ['search'],
-    auth: 'api-key',
+    auth: 'anonymous',
     tier: 'community',
     maintainer: 'c-mongan',
     credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',

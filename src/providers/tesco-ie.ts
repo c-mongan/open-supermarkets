@@ -434,8 +434,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     if (!response.ok) {
       throw new ProviderHttpError(
         'Tesco Ireland search index',
-        response.status,
-        compactSnippet(text)
+        response.status
       );
     }
 
@@ -559,8 +558,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     if (!response.ok) {
       throw new ProviderHttpError(
         'Tesco Ireland',
-        response.status,
-        compactSnippet(text)
+        response.status
       );
     }
 
