@@ -57,6 +57,17 @@ export const PROVIDERS: ProviderManifest[] = [
 
   // ── Ireland ──────────────────────────────────────────────────────────
   {
+    id: 'lidl-ie',
+    label: 'Lidl Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
+    load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
+  },
+  {
     id: 'aldi-ie',
     label: 'Aldi Ireland',
     country: 'IE',
@@ -67,17 +78,6 @@ export const PROVIDERS: ProviderManifest[] = [
     credit:
       'Protocol reimplemented from AviBackToBlack/lidaldi and but3k4/supermarket-mcp (MIT)',
     load: async () => (await import('./aldi-ie')).AldiIrelandProvider,
-  },
-  {
-    id: 'lidl-ie',
-    label: 'Lidl Ireland',
-    country: 'IE',
-    capabilities: ['search'],
-    auth: 'none',
-    tier: 'community',
-    maintainer: 'c-mongan',
-    credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
-    load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
   },
 
   // ── Netherlands ──────────────────────────────────────────────────────

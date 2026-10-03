@@ -92,6 +92,10 @@ check('missing capability fails loudly', () => {
   assert.throws(() => registry.assertCapability('ah', 'checkout'), /does not support/);
 });
 
+check('Aldi preserves Lidl as the Ireland default search provider', () => {
+  assert.equal(registry.providersFor('IE', 'search')[0].id, 'lidl-ie');
+});
+
 check('providersFor explains an empty country rather than returning []', () => {
   assert.throws(() => registry.providersFor('ZZ'), /Countries covered/);
 });

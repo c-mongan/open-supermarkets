@@ -24,7 +24,6 @@ import {
   firstString,
   type FetchLike,
   jsonResponse,
-  ProviderHttpError,
   ProviderInputError,
   ProviderProtocolError,
   requireRecordArray,
@@ -55,14 +54,7 @@ function joinBrandAndName(brand: unknown, name: unknown): string {
   return alreadyNamed ? n : `${b} ${n}`;
 }
 
-function env(name: string): string | undefined {
-  const processLike = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  const value = processLike.process?.env?.[name];
-  return asString(value);
-}
-
 const PRIMARY_SEARCH = 'https://asl.api.aldi.ie/commerce/v3/product-search';
-const LEGACY_SEARCH = 'https://api.aldi.ie/v3/product-search';
 const SERVICE_POINTS = 'https://asl.api.aldi.ie/commerce/v2/service-points';
 const ALLOWED_PAGE_SIZES = [12, 16, 24, 30, 32, 48, 60] as const;
 const STORE_LOOKUP_LIMIT = 20;
@@ -72,7 +64,6 @@ const STORE_LOOKUP_MAX_PAGES = 100;
 export interface AldiIrelandOptions {
   fetcher?: FetchLike;
   primarySearchUrl?: string;
-  legacySearchUrl?: string;
   servicePointsUrl?: string;
   storeId?: string;
   requestTimeoutMs?: number;
@@ -105,7 +96,7 @@ function retailPrice(item: Record<string, unknown>): number | undefined {
   )) return undefined;
   // The live Aldi response includes both an integer minor-unit amount and a
   // display value. Prefer the display value because it is already in EUR.
-  const display = firstNumber(price.amountRelevantDisplay, price.amountDisplay);
+  const display = firstNumber(asString(price.amountRelevantDisplay), asString(price.amountDisplay));
   if (display !== undefined) return display;
 
   // Both amountRelevant and amount are integer minor units in the live API.
@@ -280,7 +271,7 @@ function storeLookupOptions(options: StoreSearchOptions): {
 export class AldiIrelandProvider implements GroceryProvider {
   readonly name = 'aldi-ie';
   private readonly fetcher: FetchLike;
-  private readonly searchUrls: readonly string[];
+  private readonly searchUrl: string;
   private readonly servicePointsUrl: string;
   private readonly requestTimeoutMs: number;
   private readonly storeLookupTimeoutMs: number;
@@ -296,12 +287,9 @@ export class AldiIrelandProvider implements GroceryProvider {
       }
     }
     this.fetcher = options.fetcher ?? fetch;
-    this.searchUrls = [
-      options.primarySearchUrl ?? PRIMARY_SEARCH,
-      options.legacySearchUrl ?? LEGACY_SEARCH,
-    ];
+    this.searchUrl = options.primarySearchUrl ?? PRIMARY_SEARCH;
     this.servicePointsUrl = options.servicePointsUrl ?? SERVICE_POINTS;
-    const storeId = options.storeId ?? env('SUPERMARKET_ALDI_IE_STORE_ID') ?? env('ALDI_IE_SERVICE_POINT');
+    const storeId = options.storeId;
     this.storeId = storeId === undefined ? undefined : normalizedStoreId(storeId);
   }
 
@@ -318,62 +306,39 @@ export class AldiIrelandProvider implements GroceryProvider {
       : await this.validatedStoreId(requestedStoreId);
     if (!storeId) {
       throw new ProviderInputError('Aldi Ireland',
-        'Aldi Ireland requires a store id. Pass --store-id or set SUPERMARKET_ALDI_IE_STORE_ID.'
+        'Aldi Ireland requires an explicit store id. Pass --store-id.'
       );
     }
-    let lastError: unknown;
-
-    for (let index = 0; index < this.searchUrls.length; index++) {
-      const url = new URL(this.searchUrls[index]!);
-      url.searchParams.set('q', normalizedQuery);
-      url.searchParams.set('currency', 'EUR');
-      url.searchParams.set('limit', String(pageSize(limit)));
-      url.searchParams.set('offset', String(offset));
-      url.searchParams.set('serviceType', 'walk-in');
-      url.searchParams.set('sort', 'RELEVANCE');
-      url.searchParams.set('servicePoint', storeId);
-
-      try {
-        const payload = await this.requestJson(
-          url, {
-            headers: {
-              Accept: 'application/json',
-              'Accept-Language': 'en-IE,en;q=0.9',
-            },
-          },
-          'Aldi Ireland'
-        );
-        const root = asRecord(payload);
-        const source = root.data;
-        const rows = requireRecordArray(source, 'Aldi Ireland', 'data collection');
-        const products = rows
-          .map(mapProduct)
-          .filter((product): product is Product => product !== undefined);
-        if (Array.isArray(source) && source.length > 0 && products.length === 0) {
-          throw new ProviderProtocolError(
-            'Aldi Ireland',
-            'data collection contained no valid products'
-          );
-        }
-        return products.slice(0, limit);
-      } catch (error) {
-        lastError = error;
-        // The two known hosts are protocol variants. Only fall back when the
-        // route is absent; do not turn a 403/429 into a second burst of traffic.
-        if (
-          index === 0 &&
-          error instanceof ProviderHttpError &&
-          (error.status === 404 || error.status === 410)
-        ) {
-          continue;
-        }
-        throw error;
-      }
+    const url = new URL(this.searchUrl);
+    url.searchParams.set('q', normalizedQuery);
+    url.searchParams.set('currency', 'EUR');
+    url.searchParams.set('limit', String(pageSize(limit)));
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('serviceType', 'walk-in');
+    url.searchParams.set('sort', 'RELEVANCE');
+    url.searchParams.set('servicePoint', storeId);
+    const payload = await this.requestJson(
+      url, {
+        headers: {
+          Accept: 'application/json',
+          'Accept-Language': 'en-IE,en;q=0.9',
+        },
+      },
+      'Aldi Ireland'
+    );
+    const root = asRecord(payload);
+    const source = root.data;
+    const rows = requireRecordArray(source, 'Aldi Ireland', 'data collection');
+    const products = rows
+      .map(mapProduct)
+      .filter((product): product is Product => product !== undefined);
+    if (Array.isArray(source) && source.length > 0 && products.length === 0) {
+      throw new ProviderProtocolError(
+        'Aldi Ireland',
+        'data collection contained no valid products'
+      );
     }
-
-    throw lastError instanceof Error
-      ? lastError
-      : new Error('Aldi Ireland search failed');
+    return products.slice(0, limit);
   }
 
   async listStores(options: StoreSearchOptions = {}): Promise<Store[]> {

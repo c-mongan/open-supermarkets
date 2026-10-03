@@ -167,7 +167,7 @@ test('aldi: maps stock-specific signals and ignores catalogue availability', asy
 test('aldi: refuses to search without an explicit store selection', async () => {
   const calls = [];
   const provider = new AldiIrelandProvider({ fetcher: queueFetch([], calls) });
-  await rejects(() => provider.search('milk'), /requires a store id/i);
+  await rejects(() => provider.search('milk'), /requires an explicit store id/i);
   assert.equal(calls.length, 0);
 });
 
@@ -249,19 +249,12 @@ test('aldi: rejects incomplete store coordinates and unknown service points', as
   await rejects(() => unknown.selectStore('d999'), /service point D999 was not found/);
 });
 
-test('aldi: falls back to the legacy host only for a missing primary route', async () => {
-  const calls = [];
-  const provider = new AldiIrelandProvider({
-    storeId: 'D001',
-    fetcher: searchFetch([
-      { body: 'not found', status: 404 },
-      jsonFixture('aldi-search.json'),
-    ], calls),
-  });
-  const products = await provider.search('milk');
-  assert.equal(products.length, 2);
-  assert.equal(calls.length, 2);
-  assert.match(calls[1].url, /api\.aldi\.ie/);
+test('aldi: missing primary routes fail without an unverified fallback', async () => {
+  for(const status of [404,410]) {
+    const calls=[];const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{body:'missing',status}],calls)});
+    await rejects(()=>p.search('milk'),new RegExp(`HTTP ${status}`));
+    assert.equal(calls.length,1);assert.equal(new URL(calls[0].url).hostname,'asl.api.aldi.ie');
+  }
 });
 
 test('aldi: does not retry a blocked request against another host', async () => {
@@ -351,16 +344,22 @@ test('aldi: amount fallback is cents and missing prices fail truthfully', async 
   await rejects(()=>q.search('milk'),/no valid products/);
 });
 
-test('aldi: constructor and environment stores are validated before search', async () => {
-  const previous=process.env.SUPERMARKET_ALDI_IE_STORE_ID;
+test('aldi: constructor stores are validated before search', async () => {
+  const calls=[];const p=new AldiIrelandProvider({storeId:'D999',fetcher:queueFetch([jsonFixture('aldi-stores.json')],calls)});
+  await rejects(()=>p.search('milk'),/D999 was not found/);
+  assert.equal(calls.length,1);assert.match(calls[0].url,/service-points/);
+});
+
+test('aldi: environment stores cannot enable unscoped search', async () => {
+  const names=['SUPERMARKET_ALDI_IE_STORE_ID','ALDI_IE_SERVICE_POINT'];
+  const previous=names.map(name=>process.env[name]);
   try {
-    for(const fromEnv of [false,true]) {
-      const calls=[]; if(fromEnv)process.env.SUPERMARKET_ALDI_IE_STORE_ID='D999';
-      const p=new AldiIrelandProvider({...(fromEnv?{}:{storeId:'D999'}),fetcher:queueFetch([jsonFixture('aldi-stores.json')],calls)});
-      await rejects(()=>p.search('milk'),/D999 was not found/);
-      assert.equal(calls.length,1);assert.match(calls[0].url,/service-points/);
-    }
-  }finally{if(previous===undefined)delete process.env.SUPERMARKET_ALDI_IE_STORE_ID;else process.env.SUPERMARKET_ALDI_IE_STORE_ID=previous;}
+    for(const name of names)process.env[name]='D001';
+    const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([],calls)});
+    await rejects(()=>p.search('milk'),/requires an explicit store id/);assert.equal(calls.length,0);
+    const q=new AldiIrelandProvider({fetcher:searchFetch([jsonFixture('aldi-search.json')])});
+    assert.equal((await q.search('milk',{storeId:'D001'})).length,2);
+  }finally{names.forEach((name,index)=>{if(previous[index]===undefined)delete process.env[name];else process.env[name]=previous[index];});}
 });
 
 test('aldi: unknown request store cannot reach product search', async () => {
@@ -551,6 +550,15 @@ test('aldi: returned invalid coordinates remain unknown', async () => {
   }
   const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store',latitude:90,longitude:-180}]}])});
   assert.deepEqual((await p.listStores())[0].location,{latitude:90,longitude:-180});
+});
+
+test('aldi: numeric display fields cannot become major-unit prices', async () => {
+  for(const field of ['amountRelevantDisplay','amountDisplay']) {
+    const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'numeric-display',name:'Milk',price:{[field]:139,amountRelevant:139,comparisonDisplay:139}}]}])});
+    const [product]=await p.search('milk');assert.equal(product.retail_price.price,1.39);assert.equal(product.unit_price,undefined);
+    const q=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'no-minor',name:'Milk',price:{[field]:139}}]}])});
+    await rejects(()=>q.search('milk'),/no valid products/);
+  }
 });
 
 async function main() {
