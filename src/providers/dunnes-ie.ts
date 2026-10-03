@@ -397,7 +397,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
       selection.retailerStoreId &&
       !stores.some((store) => store.store_id === selection.retailerStoreId)
     ) {
-      throw new ProviderInputError('Dunnes Ireland', 
+      throw new ProviderInputError('Dunnes Ireland',
         `Dunnes Ireland retailer store ${selection.retailerStoreId} was not found`
       );
     }
@@ -410,10 +410,10 @@ export class DunnesIrelandProvider implements GroceryProvider {
 
   private async validateStore(storeId: string): Promise<void> {
     const [store] = await this.listStores({ retailerStoreId: storeId, limit: 1 });
-    if (store.currency && store.currency !== 'EUR') {
+    if (store.currency !== 'EUR') {
       throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland requires a EUR-priced store');
     }
-    if (store.shopping_modes && !store.shopping_modes.includes('delivery')) {
+    if (!store.shopping_modes?.includes('delivery')) {
       throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland search requires a store with delivery mode');
     }
   }
@@ -431,7 +431,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
   ): Promise<Product[]> {
     const storeId = this.storeId;
     if (!storeId) {
-      throw new ProviderInputError('Dunnes Ireland', 
+      throw new ProviderInputError('Dunnes Ireland',
         'Dunnes gateway search is store-scoped. Set DUNNES_IE_STORE_ID or pass storeId.'
       );
     }

@@ -390,7 +390,7 @@ test('dunnes: a verified empty collection is valid', async () => {
 test('dunnes: separate provider instances retain their selected store', async () => {
   const callsA=[], callsB=[];
   const storesA=jsonFixture('dunnes-stores.json');
-  const storesB={items:[{retailerStoreId:'412', name:'Jetland'}]};
+  const storesB={items:[{retailerStoreId:'412', name:'Jetland',currency:'EUR',shoppingModes:['Delivery']}]};
   const a=new DunnesIrelandProvider({fetcher:queueFetch([storesA,jsonFixture('dunnes-gateway.json')],callsA)});
   const b=new DunnesIrelandProvider({fetcher:queueFetch([storesB,jsonFixture('dunnes-gateway.json')],callsB)});
   await a.selectStore('258'); await b.selectStore('412');
@@ -431,7 +431,7 @@ test('dunnes: text prices cannot convert multibuy offers into invented numbers',
 });
 
 test('dunnes: selection rejects unsupported currency and pickup-only stores', async () => {
-  for (const extra of [{currency:'GBP'},{shoppingModes:['Pickup']}]) {
+  for (const extra of [{currency:'GBP',shoppingModes:['Delivery']},{currency:'EUR',shoppingModes:['Pickup']},{shoppingModes:['Delivery']},{currency:'EUR'},{}]) {
     const p=new DunnesIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'1',name:'Store',...extra}]}])});
     await assert.rejects(()=>p.selectStore('1'),/EUR-priced|delivery mode/);
   }
@@ -445,7 +445,7 @@ test('dunnes: implicit validation cannot overwrite a concurrent explicit selecti
     if(url.pathname==='/api/stores' && url.searchParams.get('RetailerStoreId')==='258') {
       return new Promise(resolve=>{finishValidation=()=>resolve(response(jsonFixture('dunnes-stores.json')))});
     }
-    if(url.pathname==='/api/stores') return response({items:[{retailerStoreId:'412',name:'Jetland'}]});
+    if(url.pathname==='/api/stores') return response({items:[{retailerStoreId:'412',name:'Jetland',currency:'EUR',shoppingModes:['Delivery']}]});
     return response(jsonFixture('dunnes-gateway.json'));
   }});
   const first=p.search('bread');
