@@ -436,6 +436,20 @@ test('mrprice: ignores hidden and unrelated empty-result messages', async () => 
   }
 });
 
+test('mrprice: rejects decimal-form HTML cents strings', async () => {
+  for(const price of ['12.00','12,00']) {
+    const html=`<div id="js-product-ajax"><div class="product-card" data-price="${price}"><a href="/products/item">Item</a></div></div>`;
+    await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk'), /no valid products/);
+  }
+});
+
+test('mrprice: matches escaped query attributes without changing spaces or decoding twice', async () => {
+  for(const [query,value] of [['a<b>','a&lt;b&gt;'],['whole  milk','whole  milk'],['a&lt;b','a&amp;lt;b']]) {
+    const html=`<main id="MainContent"><form class="search-form" action="/search"><input name="q" value="${value}"></form><div class="collection-nomatch-text">No results found</div></main>`;
+    assert.deepEqual(await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search(query),[]);
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

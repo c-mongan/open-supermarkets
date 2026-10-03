@@ -20,18 +20,21 @@ import {
   responseText,
 } from './ie/shared';
 
+function decodeEntities(value: string): string {
+  return value.replace(/&(amp|quot|apos|nbsp|lt|gt|#x[0-9a-f]+|#[0-9]+);/gi, (entity, value: string) => {
+    const named: Record<string, string> = { amp: '&', quot: '"', apos: "'", nbsp: ' ', lt: '<', gt: '>' };
+    const token = value.toLowerCase();
+    if (named[token] !== undefined) return named[token];
+    const point = token.startsWith('#x') ? parseInt(token.slice(2), 16) : Number(token.slice(1));
+    return point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+  });
+}
+
 function htmlText(value: string): string {
-  return value
+  return decodeEntities(value
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&(amp|quot|apos|nbsp|#x[0-9a-f]+|#[0-9]+);/gi, (entity, value: string) => {
-      const named: Record<string, string> = { amp: '&', quot: '"', apos: "'", nbsp: ' ' };
-      const token = value.toLowerCase();
-      if (named[token] !== undefined) return named[token];
-      const point = token.startsWith('#x') ? parseInt(token.slice(2), 16) : Number(token.slice(1));
-      return point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
-    })
+    .replace(/<[^>]+>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -45,6 +48,7 @@ export interface MrPriceIrelandOptions {
 }
 
 function shopifyMoney(value: unknown, cents = false): number | undefined {
+  if (cents && typeof value === 'string' && !/^\d+$/.test(value.trim())) return undefined;
   let parsed: number | undefined;
   if (typeof value === 'number') parsed = value;
   else if (typeof value === 'string' && /^\d+(?:[.,]\d+)?$/.test(value.trim())) {
@@ -218,7 +222,7 @@ function hasNoResultsMessage(html: string, query: string): boolean {
   const formContent = elementContent(content, form, 'search form');
   const queryInput = [...formContent.matchAll(/<input\b[^>]*>/gi)]
     .find(match => extractAttribute(match[0], 'name') === 'q');
-  if (!queryInput || htmlText(extractAttribute(queryInput[0], 'value') ?? '') !== query) return false;
+  if (!queryInput || decodeEntities(extractAttribute(queryInput[0], 'value') ?? '') !== query) return false;
   return [...content.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
     .filter(match => hasClass(match[0], 'collection-nomatch-text'))
     .some(marker => htmlText(elementContent(content, marker, 'no-results message')) === 'No results found');
