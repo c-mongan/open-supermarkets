@@ -4,16 +4,25 @@
  * Prints a final `__ROUTING__ {json}` line on stderr describing loads and
  * network attempts so the parent test can assert on them.
  */
-import { installFakes, loadCount, GUARDED_REAL_IDS, events } from './store-routing-fakes';
+import { installFakes, loadCount, GUARDED_REAL_IDS, FAKE_IDS, events } from './store-routing-fakes';
 import * as fakes from './store-routing-fakes';
 
 installFakes();
+
+// One supported legacy read proves the command guard leaves declared capabilities usable.
+if (process.env.TEST_FAKE_LEGACY === '1') {
+  require('../../src/providers').ProviderFactory.create = () => ({
+    name: 'sainsburys',
+    getBasket: async () => ({ items: [], total_quantity: 0, total_cost: 0, provider: 'sainsburys' }),
+  });
+}
 
 function report(): void {
   const loads = Object.fromEntries(GUARDED_REAL_IDS.map((id) => [id, loadCount(id)]));
   process.stderr.write(
     `\n__ROUTING__ ${JSON.stringify({
       loads,
+      fakeLoads: Object.fromEntries(FAKE_IDS.map((id) => [id, loadCount(id)])),
       fetchCalls: fakes.fetchCalls,
       selects: events.selects,
       searches: events.searches.map(({ query, selectedStoreId, options }) => ({
