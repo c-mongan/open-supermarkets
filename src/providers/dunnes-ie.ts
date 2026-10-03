@@ -395,14 +395,6 @@ export class DunnesIrelandProvider implements GroceryProvider {
       skip += rowCount;
     }
 
-    if (
-      selection.retailerStoreId &&
-      !stores.some((store) => store.store_id === selection.retailerStoreId)
-    ) {
-      throw new ProviderInputError('Dunnes Ireland',
-        `Dunnes Ireland retailer store ${selection.retailerStoreId} was not found`
-      );
-    }
     const filtered = stores.filter((store) =>
       (!selection.retailerStoreId || store.store_id === selection.retailerStoreId) && storeMatches(store, selection.fullTextSearch, selection.postcode)
     );
@@ -412,6 +404,9 @@ export class DunnesIrelandProvider implements GroceryProvider {
 
   private async validateStore(storeId: string): Promise<void> {
     const [store] = await this.listStores({ retailerStoreId: storeId, limit: 1 });
+    if (!store) {
+      throw new ProviderInputError('Dunnes Ireland', `retailer store ${storeId} was not found`);
+    }
     if (store.currency !== 'EUR') {
       throw new ProviderInputError('Dunnes Ireland', 'Dunnes Ireland requires a EUR-priced store');
     }

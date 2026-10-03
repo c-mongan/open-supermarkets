@@ -491,4 +491,12 @@ test('dunnes: non-page-aligned search offsets use only absolute skip', async () 
   assert.equal(url.searchParams.has('page'),false);
 });
 
+test('dunnes: filtered pagination and nearby windows do not claim store nonexistence', async () => {
+  for (const options of [{retailerStoreId:'258',offset:1},
+    {retailerStoreId:'258',latitude:53.2,longitude:-6.2,limit:1}]) {
+    const p=new DunnesIrelandProvider({fetcher:queueFetch([{items:[]}])});
+    assert.deepEqual(await p.listStores(options),[]);
+  }
+});
+
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });
