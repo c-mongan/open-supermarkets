@@ -289,7 +289,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
 
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
     if (!this.storeId) {
-      throw new ProviderInputError('SuperValu Ireland', 
+      throw new ProviderInputError('SuperValu Ireland',
         'SuperValu Ireland requires a store id. Set SUPERMARKET_SUPERVALU_STORE_ID.'
       );
     }
@@ -485,7 +485,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       selection.retailerStoreId &&
       !stores.some((store) => store.store_id === selection.retailerStoreId)
     ) {
-      throw new ProviderInputError('SuperValu Ireland', 
+      throw new ProviderInputError('SuperValu Ireland',
         `SuperValu Ireland retailer store ${selection.retailerStoreId} was not found`
       );
     }
