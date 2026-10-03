@@ -483,6 +483,9 @@ export class SuperValuIrelandProvider implements GroceryProvider {
 
     if (
       selection.retailerStoreId &&
+      selection.offset === 0 &&
+      selection.latitude === undefined &&
+      !localFilter &&
       !stores.some((store) => store.store_id === selection.retailerStoreId)
     ) {
       throw new ProviderInputError('SuperValu Ireland',

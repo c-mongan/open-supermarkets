@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const jsonFixture = (name) => JSON.parse(fixture(name));
 
-const { SuperValuIrelandProvider } = require('../dist/providers/supervalu-ie.js');
+const { SuperValuIrelandProvider } = require('../src/providers/supervalu-ie.ts');
 function response(body, status = 200, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   return {
@@ -422,8 +422,8 @@ test('supervalu: failed selection preserves the previous store', async () => {
 });
 
 test('supervalu: registry and legacy factory declare only tested capabilities', async () => {
-  const {getManifest, createProvider} = require('../dist/providers/registry.js');
-  const {ProviderFactory} = require('../dist/providers/index.js');
+  const {getManifest, createProvider} = require('../src/providers/registry.ts');
+  const {ProviderFactory} = require('../src/providers/index.ts');
   const manifest = getManifest('supervalu-ie');
   assert.deepEqual(manifest.capabilities, ['search', 'stores']);
   assert.equal(manifest.country, 'IE');
@@ -469,6 +469,13 @@ test('supervalu: malformed promotional unit text is unknown', async () => {
   const provider = new SuperValuIrelandProvider({storeId:'5550',fetcher:queueFetch([jsonFixture('supervalu-stores.json'),payload])});
   const [product] = await provider.search('milk');
   assert.equal(product.unit_price, undefined);
+});
+
+test('supervalu: combined pagination and nearby filters can return an empty store page', async () => {
+  for (const options of [{retailerStoreId:'5550',offset:1}, {retailerStoreId:'5550',latitude:53,longitude:-9}]) {
+    const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[]}])});
+    assert.deepEqual(await provider.listStores(options), []);
+  }
 });
 
 (async () => {
