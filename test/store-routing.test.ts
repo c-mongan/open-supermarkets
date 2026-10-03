@@ -69,6 +69,7 @@ async function helpers(): Promise<void> {
     );
     assert.deepEqual(parseStoreSearchOptions({}), { limit: 10 });
     assert.deepEqual(parseStoreSearchOptions({}, 20), { limit: 20 });
+    assert.deepEqual(parseStoreSearchOptions({ limit: 1000000000 }), { limit: 100 });
     for (const bad of [
       { latitude: '53' },
       { latitude: '91', longitude: '0' },
@@ -87,6 +88,7 @@ async function helpers(): Promise<void> {
 
   await test('store ids: absent passes, blank is 400, unsupported provider is 501', () => {
     assert.equal(prepareStoreId('fake-stores', undefined), undefined);
+    assert.throws(() => prepareStoreId('fake-stores', null), (e: any) => e.statusCode === 400);
     assert.equal(prepareStoreId('fake-stores', ' s1 '), 's1');
     assert.throws(() => prepareStoreId('fake-stores', ''), (e: any) => e.statusCode === 400);
     assert.throws(() => prepareStoreId('fake-stores', 42), (e: any) => e.statusCode === 400);
@@ -263,10 +265,8 @@ async function mcpRoutes(): Promise<void> {
     await test('tools list grocery_stores and optional store_id on search tools', async () => {
       const { tools } = await client.listTools();
       const byName = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema as any]));
-      assert.deepEqual(
-        byName.grocery_stores.properties.provider.enum,
-        PROVIDERS.filter((m) => m.capabilities.includes('stores')).map((m) => m.id)
-      );
+      assert.deepEqual(byName.grocery_stores.properties.provider.enum,
+        PROVIDERS.filter((p) => p.capabilities.includes('stores')).map((p) => p.id));
       assert.equal(byName.grocery_search.properties.store_id.type, 'string');
       assert.equal(byName.grocery_search_batch.properties.store_id.type, 'string');
       assert.ok(byName.grocery_search.properties.provider.enum.includes('lidl-ie'));
@@ -322,17 +322,31 @@ async function mcpRoutes(): Promise<void> {
       }
     });
 
-    await test('authenticated store lookup keeps the login gate', async () => {
+    await test('registry credentials are delegated to providers instead of legacy session files', async () => {
       const manifest = PROVIDERS.find((m) => m.id === 'fake-stores')!;
+      const searchManifest = PROVIDERS.find((m) => m.id === 'fake-search')!;
       const originalAuth = manifest.auth;
+      const originalSearchAuth = searchManifest.auth;
+      const ctor = await manifest.load();
+      const originalList = ctor.prototype.listStores;
       try {
         manifest.auth = 'credentials';
-        const r = await call('grocery_stores', { provider: 'fake-stores' });
-        assert.equal(r.isError, true, r.text);
-        assert.match(r.text, /Not logged in to fake-stores/);
-        assert.equal(events.listStores.length, 0);
+        searchManifest.auth = 'api-key';
+        const stores = await call('grocery_stores', { provider: 'fake-stores' });
+        assert.equal(stores.isError, false, stores.text);
+        const search = await call('grocery_search', { provider: 'fake-search', query: 'milk' });
+        assert.equal(search.isError, false, search.text);
+        const batch = await call('grocery_search_batch', { provider: 'fake-search', queries: ['milk'] });
+        assert.equal(batch.isError, false, batch.text);
+        ctor.prototype.listStores = async () => { throw new Error('Configure FAKE_STORE_TOKEN'); };
+        const failure = await call('grocery_stores', { provider: 'fake-stores' });
+        assert.equal(failure.isError, true);
+        assert.match(failure.text, /Configure FAKE_STORE_TOKEN/);
+        assert.doesNotMatch(failure.text, /Not logged in/);
       } finally {
         manifest.auth = originalAuth;
+        searchManifest.auth = originalSearchAuth;
+        ctor.prototype.listStores = originalList;
       }
     });
 
@@ -340,6 +354,10 @@ async function mcpRoutes(): Promise<void> {
       await offline(async () => {
         for (const [tool, args, pattern] of [
           ['grocery_search', { provider: 'lidl-ie', query: 'milk', store_id: 's1' }, /does not support "stores"/],
+          ['grocery_search', { provider: 'sainsburys', query: 'milk', store_id: 's1' }, /does not support "stores"/],
+          ['grocery_search_batch', { provider: 'sainsburys', queries: ['milk'], store_id: null }, /non-empty/],
+          ['grocery_search', { provider: 'fake-stores', query: 'milk', store_id: null }, /non-empty/],
+          ['grocery_search_batch', { provider: 'fake-stores', queries: ['milk'], store_id: null }, /non-empty/],
           ['grocery_search_batch', { provider: 'ahorramas', queries: ['milk'], store_id: 's1' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'mercadona' }, /does not support "stores"/],
           ['grocery_stores', { provider: 'fake-stores', latitude: 53 }, /together/],
@@ -413,6 +431,17 @@ async function cliRoutes(): Promise<void> {
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(JSON.parse(r.stdout).stores.map((s: any) => s.store_id), ['s1', 's2']);
     assert.deepEqual(r.routing.listStores, [{ limit: 2, postcode: 'D01' }]);
+  });
+
+  await test('global store scope rejects every unsupported command before its action', () => {
+    for (const args of [['add', '1'], ['checkout', '--confirm'], ['remove', '1'], ['update', '1', '2'], ['clear'], ['basket'], ['favourites'], ['categories'], ['regulars'], ['providers']]) {
+      const r = runCli(['--provider', 'fake-stores', '--store-id', 's1', ...args]);
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /--store-id is only supported by search and stores/);
+      assert.equal(r.routing.searches.length, 0);
+      assert.equal(r.routing.selects.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
   });
 
   await test('unsupported or invalid store routes fail before provider code or network', () => {
