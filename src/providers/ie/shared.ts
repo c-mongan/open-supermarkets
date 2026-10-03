@@ -222,7 +222,7 @@ export function absoluteUrl(base: string, candidate: unknown): string | undefine
 export function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
   const text = asString(value);
   if (!text) return undefined;
-  const match = text.match(/€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*(.+)$/i);
+  const match = text.match(/^€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*((?:[0-9]+(?:[.,][0-9]+)?\s*)?(?:kg|g|l|ml|cl|each|ea|unit|pack))$/i);
   if (!match) return undefined;
   const price = asNumber(match[1]);
   const measure = match[2]?.trim();

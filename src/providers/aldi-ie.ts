@@ -330,6 +330,12 @@ export class AldiIrelandProvider implements GroceryProvider {
   }
 
   async listStores(options: StoreSearchOptions = {}): Promise<Store[]> {
+    return (await this.storePage(options)).stores;
+  }
+
+  private async storePage(options: StoreSearchOptions): Promise<{
+    stores: Store[]; rawCount: number; pageSize: number; totalCount?: number;
+  }> {
     const selection = storeLookupOptions(options);
     const url = new URL(this.servicePointsUrl);
     url.searchParams.set('offset', String(selection.offset));
@@ -356,7 +362,18 @@ export class AldiIrelandProvider implements GroceryProvider {
     if (Array.isArray(source) && source.length > 0 && stores.length === 0) {
       throw new ProviderProtocolError('Aldi Ireland stores', 'service-point collection contained no valid stores');
     }
-    return stores;
+    const pagination = asRecord(asRecord(root.meta).pagination);
+    const reportedPageSize = firstNumber(pagination.limit);
+    const pageSize = reportedPageSize ?? selection.limit;
+    const totalCount = firstNumber(pagination.totalCount);
+    if ((pagination.limit !== undefined && reportedPageSize === undefined) ||
+        (pagination.totalCount !== undefined && totalCount === undefined) ||
+        !Number.isInteger(pageSize) || pageSize < 1 || pageSize > selection.limit ||
+        (source as unknown[]).length > pageSize ||
+        (totalCount !== undefined && (!Number.isInteger(totalCount) || totalCount < 0))) {
+      throw new ProviderProtocolError('Aldi Ireland stores', 'invalid store pagination metadata');
+    }
+    return { stores, rawCount: (source as unknown[]).length, pageSize, totalCount };
   }
 
   async selectStore(storeId: string): Promise<void> {
@@ -367,9 +384,10 @@ export class AldiIrelandProvider implements GroceryProvider {
     const selectedStoreId = normalizedStoreId(storeId);
     if (this.validatedStoreIds.has(selectedStoreId)) return selectedStoreId;
     const seen = new Set<string>();
+    let offset = 0;
     for (let page = 0; page < STORE_LOOKUP_MAX_PAGES; page++) {
-      const offset = page * STORE_LOOKUP_MAX;
-      const stores = await this.listStores({ limit: STORE_LOOKUP_MAX, offset });
+      const result = await this.storePage({ limit: STORE_LOOKUP_MAX, offset });
+      const { stores, rawCount, pageSize, totalCount } = result;
       if (stores.some((store) => store.store_id === selectedStoreId)) {
         this.validatedStoreIds.add(selectedStoreId);
         return selectedStoreId;
@@ -378,9 +396,16 @@ export class AldiIrelandProvider implements GroceryProvider {
         throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned overlapping identifiers');
       }
       for (const store of stores) seen.add(store.store_id);
-      if (stores.length < STORE_LOOKUP_MAX) {
+      const exhausted = totalCount === undefined
+        ? rawCount < pageSize
+        : offset + rawCount >= totalCount;
+      if (exhausted) {
         throw new ProviderInputError('Aldi Ireland', `service point ${selectedStoreId} was not found`);
       }
+      if (rawCount !== pageSize) {
+        throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned an incomplete page');
+      }
+      offset += pageSize;
     }
     throw new ProviderProtocolError('Aldi Ireland stores', 'store validation exceeded the 100-page safety limit');
   }

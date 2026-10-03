@@ -3,6 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const jsonFixture = (name) => JSON.parse(fixture(name));
+const storeFixture = (limit, offset = 0) => {
+  const data = jsonFixture('aldi-stores.json');
+  data.meta.pagination.limit = limit;
+  data.meta.pagination.offset = offset;
+  return data;
+};
 const { AldiIrelandProvider } = require('../src/providers/aldi-ie.ts');
 
 function response(body, status = 200, headers = {}) {
@@ -166,7 +172,7 @@ test('aldi: refuses to search without an explicit store selection', async () => 
 test('aldi: lists anonymous walk-in stores using the official service-point schema', async () => {
   const calls = [];
   const provider = new AldiIrelandProvider({
-    fetcher: queueFetch([jsonFixture('aldi-stores.json')], calls),
+    fetcher: queueFetch([storeFixture(4, 2)], calls),
   });
   const stores = await provider.listStores({
     limit: 4,
@@ -190,7 +196,7 @@ test('aldi: lists anonymous walk-in stores using the official service-point sche
 test('aldi: sends the official postcode and nearby-store query parameters', async () => {
   const calls = [];
   const provider = new AldiIrelandProvider({
-    fetcher: queueFetch([jsonFixture('aldi-stores.json'), jsonFixture('aldi-stores.json')], calls),
+    fetcher: queueFetch([storeFixture(20), storeFixture(4)], calls),
   });
   await provider.listStores({ postcode: 'D01 F295' });
   await provider.listStores({ limit: 4, latitude: 53.35, longitude: -6.26 });
@@ -397,6 +403,34 @@ test('aldi: exhausted store validation is not reported as missing store', async 
   const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch(pages,calls)});
   await rejects(()=>p.selectStore('D999'),/exceeded the 100-page safety limit/);
   assert.equal(calls.length,100);
+});
+
+test('aldi: malformed mapped store rows do not truncate remote pagination', async () => {
+  const first={data:Array.from({length:100},(_,i)=>i===0?{}:{id:`P${i}`,name:'Store'})};
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([first,{data:[{id:'D600',name:'Later store'}]}],calls)});
+  await p.selectStore('D600');assert.equal(new URL(calls[1].url).searchParams.get('offset'),'100');
+});
+
+test('aldi: retailer page caps advance by the advertised page size', async () => {
+  const first={data:[{id:'P0',name:'Store'},{id:'P1',name:'Store'}],meta:{pagination:{limit:2,totalCount:3}}};
+  const second={data:[{id:'D600',name:'Later store'}],meta:{pagination:{limit:2,totalCount:3}}};
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([first,second],calls)});
+  await p.selectStore('D600');assert.equal(new URL(calls[1].url).searchParams.get('offset'),'2');
+});
+
+test('aldi: unexpected unit price strings remain unknown', async () => {
+  const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[
+    {sku:'promo',name:'Milk',price:{amountRelevant:139,comparisonDisplay:'Was €2.00, now €1.20/1 L'}},
+    {sku:'bad-measure',name:'Milk',price:{amountRelevant:139,comparisonDisplay:'€1.20/anything'}}
+  ]}])});
+  assert.ok((await p.search('milk')).every(p=>p.unit_price===undefined));
+});
+
+test('aldi: malformed pagination metadata fails explicitly', async () => {
+  for(const pagination of [{limit:0},{limit:'unknown'},{totalCount:-1},{totalCount:'unknown'}]) {
+    const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[],meta:{pagination}}])});
+    await rejects(()=>p.listStores(),/invalid store pagination metadata/);
+  }
 });
 
 async function main() {
