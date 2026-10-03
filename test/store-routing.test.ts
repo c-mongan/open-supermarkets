@@ -496,9 +496,19 @@ async function cliRoutes(): Promise<void> {
   await test('search --store-id selects then searches', () => {
     const r = runCli(['--provider', 'fake-stores', '--store-id', 's1', 'search', 'milk', '--json']);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(JSON.parse(r.stdout).products[0].name, 'milk@s1');
+    const body = JSON.parse(r.stdout);
+    assert.equal(body.store_id, 's1');
+    assert.equal(body.products[0].name, 'milk@s1');
     assert.equal(r.routing.selects.length, 1);
     assert.deepEqual(r.routing.searches, [{ query: 'milk', selectedStoreId: 's1', storeId: 's1' }]);
+  });
+
+  await test('human search output names the selected store', () => {
+    const r = runCli(['--provider', 'fake-stores', '--store-id', 's1', 'search', 'milk']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /Search results from fake-stores store s1:/);
+    assert.equal(r.routing.selects.length, 1);
+    assert.equal(r.routing.searches[0].storeId, 's1');
   });
 
   await test('explicit provider overrides country auto-selection for store search', () => {
