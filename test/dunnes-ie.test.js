@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const jsonFixture = (name) => JSON.parse(fixture(name));
 
-const { DunnesIrelandProvider } = require('../dist/providers/dunnes-ie.js');
+const { DunnesIrelandProvider } = require('../src/providers/dunnes-ie');
 function response(body, status = 200, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   return {
