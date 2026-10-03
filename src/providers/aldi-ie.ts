@@ -75,6 +75,8 @@ export interface AldiIrelandOptions {
   legacySearchUrl?: string;
   servicePointsUrl?: string;
   storeId?: string;
+  requestTimeoutMs?: number;
+  storeLookupTimeoutMs?: number;
 }
 
 function pageSize(limit: number): number {
@@ -215,7 +217,9 @@ function aldiStore(item: Record<string, unknown>): Store | undefined {
       addressRecord.postalCode
     )?.toUpperCase(),
     address: address || firstString(item.address),
-    location: latitude !== undefined && longitude !== undefined ? { latitude, longitude } : undefined,
+    location: latitude !== undefined && longitude !== undefined &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+      ? { latitude, longitude } : undefined,
     shopping_modes: normalizedModes(
       item.availableCustomerServiceTypes ?? item.serviceTypes ?? item.shoppingModes ?? item.serviceType
     ),
@@ -278,10 +282,19 @@ export class AldiIrelandProvider implements GroceryProvider {
   private readonly fetcher: FetchLike;
   private readonly searchUrls: readonly string[];
   private readonly servicePointsUrl: string;
+  private readonly requestTimeoutMs: number;
+  private readonly storeLookupTimeoutMs: number;
   private storeId?: string;
   private readonly validatedStoreIds = new Set<string>();
 
   constructor(options: AldiIrelandOptions = {}) {
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
+    this.storeLookupTimeoutMs = options.storeLookupTimeoutMs ?? 30_000;
+    for (const timeout of [this.requestTimeoutMs, this.storeLookupTimeoutMs]) {
+      if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647) {
+        throw new ProviderInputError('Aldi Ireland', 'timeouts must be positive timer-safe integers');
+      }
+    }
     this.fetcher = options.fetcher ?? fetch;
     this.searchUrls = [
       options.primarySearchUrl ?? PRIMARY_SEARCH,
@@ -321,13 +334,13 @@ export class AldiIrelandProvider implements GroceryProvider {
       url.searchParams.set('servicePoint', storeId);
 
       try {
-        const payload = await jsonResponse<unknown>(
-          await this.fetcher(url, {
+        const payload = await this.requestJson(
+          url, {
             headers: {
               Accept: 'application/json',
               'Accept-Language': 'en-IE,en;q=0.9',
             },
-          }),
+          },
           'Aldi Ireland'
         );
         const root = asRecord(payload);
@@ -367,7 +380,7 @@ export class AldiIrelandProvider implements GroceryProvider {
     return (await this.storePage(options)).stores;
   }
 
-  private async storePage(options: StoreSearchOptions): Promise<{
+  private async storePage(options: StoreSearchOptions, timeoutMs = this.requestTimeoutMs): Promise<{
     stores: Store[]; invalidStoreIds: string[]; rawCount: number; pageSize: number; totalCount?: number;
   }> {
     const selection = storeLookupOptions(options);
@@ -382,9 +395,9 @@ export class AldiIrelandProvider implements GroceryProvider {
       url.searchParams.set('longitude', String(selection.longitude));
       url.searchParams.set('includeNearbyServicePoints', 'true');
     }
-    const payload = await jsonResponse<unknown>(
-      await this.fetcher(url, { headers: { Accept: 'application/json', 'Accept-Language': 'en-IE,en;q=0.9' } }),
-      'Aldi Ireland stores'
+    const payload = await this.requestJson(
+      url, { headers: { Accept: 'application/json', 'Accept-Language': 'en-IE,en;q=0.9' } },
+      'Aldi Ireland stores', timeoutMs
     );
     const root = asRecord(payload);
     const data = asRecord(root.data);
@@ -416,6 +429,29 @@ export class AldiIrelandProvider implements GroceryProvider {
     return { stores, invalidStoreIds, rawCount: (source as unknown[]).length, pageSize, totalCount };
   }
 
+  private async requestJson(url: URL, init: RequestInit, provider: string, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const message = `${provider} request timed out after ${timeoutMs} ms`;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(message));
+        controller.abort();
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => jsonResponse<unknown>(await this.fetcher(url, { ...init, signal: controller.signal }), provider))(),
+        deadline,
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(message);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async selectStore(storeId: string): Promise<void> {
     this.storeId = await this.validatedStoreId(storeId);
   }
@@ -425,8 +461,11 @@ export class AldiIrelandProvider implements GroceryProvider {
     if (this.validatedStoreIds.has(selectedStoreId)) return selectedStoreId;
     const seen = new Set<string>();
     let offset = 0;
+    const deadline = Date.now() + this.storeLookupTimeoutMs;
     for (let page = 0; page < STORE_LOOKUP_MAX_PAGES; page++) {
-      const result = await this.storePage({ limit: STORE_LOOKUP_MAX, offset });
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Aldi Ireland stores lookup timed out');
+      const result = await this.storePage({ limit: STORE_LOOKUP_MAX, offset }, Math.min(this.requestTimeoutMs, remaining));
       const { stores, invalidStoreIds, rawCount, pageSize, totalCount } = result;
       if (invalidStoreIds.includes(selectedStoreId)) {
         throw new ProviderProtocolError('Aldi Ireland stores', `service point ${selectedStoreId} had an invalid store record`);

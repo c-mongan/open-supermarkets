@@ -514,6 +514,45 @@ test('aldi: unrelated id fields cannot replace a missing retailer SKU', async ()
   }
 });
 
+test('aldi: invalid timeout options fail before network access', async () => {
+  for (const value of [0,-1,1.5,Infinity,2_147_483_648]) {
+    for(const option of ['requestTimeoutMs','storeLookupTimeoutMs']) {
+      const calls=[];assert.throws(()=>new AldiIrelandProvider({[option]:value,fetcher:queueFetch([],calls)}),/timer-safe integers/);
+      assert.equal(calls.length,0);
+    }
+  }
+});
+
+test('aldi: fetch and body deadlines bound search and store requests', async () => {
+  for(const operation of ['search','stores']) {
+    for(const phase of ['fetch','body']) {
+      let signal;const calls=[];
+      const hanging=(_input,init)=>{signal=init.signal;calls.push(1);return phase==='fetch'?new Promise(()=>{}):Promise.resolve({...response({data:[]}),text:()=>new Promise(()=>{})});};
+      const p=new AldiIrelandProvider({requestTimeoutMs:20,fetcher:operation==='search'?searchFetch([call=>hanging(call.url,call.init)],calls):hanging});
+      if(operation==='search')await p.selectStore('D001');
+      const started=Date.now();await rejects(()=>operation==='search'?p.search('milk'):p.listStores(),/request timed out/);
+      assert.equal(signal.aborted,true);assert.ok(Date.now()-started<1000);
+    }
+  }
+});
+
+test('aldi: store selection has an overall pagination deadline', async () => {
+  let count=0;let signal;const p=new AldiIrelandProvider({requestTimeoutMs:1000,storeLookupTimeoutMs:35,fetcher:async(_input,init)=>{
+    signal=init.signal;count++;if(count===1)return response({data:[{id:'D001',name:'First'}]});return new Promise(()=>{});
+  }});
+  const started=Date.now();await rejects(()=>p.selectStore('D999'),/timed out/);
+  assert.equal(count,2);assert.equal(signal.aborted,true);assert.ok(Date.now()-started<1000);
+});
+
+test('aldi: returned invalid coordinates remain unknown', async () => {
+  for(const [latitude,longitude] of [[91,0],[0,181],[-91,0],[0,-181],[999,999]]) {
+    const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store',latitude,longitude}]}])});
+    assert.equal((await p.listStores())[0].location,undefined);
+  }
+  const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store',latitude:90,longitude:-180}]}])});
+  assert.deepEqual((await p.listStores())[0].location,{latitude:90,longitude:-180});
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

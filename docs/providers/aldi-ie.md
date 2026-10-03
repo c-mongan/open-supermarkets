@@ -9,7 +9,7 @@ open-supermarkets search milk --provider aldi-ie --store-id D041 --limit 3
 
 The provider supports limit and offset. Store lookup supports text, postcode, or a coordinate pair. These filters cannot be combined. Range, shopping mode, retailerStoreId and product category filters are unsupported. Basket, authentication and checkout operations are unsupported.
 
-Search returns EUR prices and retailer SKU identifiers. The primary API retries the legacy host only for HTTP 404 or 410. Authentication, rate limit, server and malformed-response errors are exposed.
+Search returns EUR prices and retailer SKU identifiers. The primary API retries the legacy host only for HTTP 404 or 410. Authentication, rate limit, server and malformed-response errors are exposed. Each request, including its body, has a 20-second deadline. Store selection has a 30-second total deadline and a 100-page safety bound. Invalid retailer coordinates are omitted.
 
 ## Verification
 
