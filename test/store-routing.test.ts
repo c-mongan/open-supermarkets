@@ -263,7 +263,8 @@ async function mcpRoutes(): Promise<void> {
     await test('tools list grocery_stores and optional store_id on search tools', async () => {
       const { tools } = await client.listTools();
       const byName = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema as any]));
-      assert.deepEqual(byName.grocery_stores.properties.provider.enum, ['fake-stores', 'fake-stores-broken']);
+      assert.deepEqual(byName.grocery_stores.properties.provider.enum,
+        PROVIDERS.filter(provider => provider.capabilities.includes('stores')).map(provider => provider.id));
       assert.equal(byName.grocery_search.properties.store_id.type, 'string');
       assert.equal(byName.grocery_search_batch.properties.store_id.type, 'string');
       assert.ok(byName.grocery_search.properties.provider.enum.includes('lidl-ie'));
