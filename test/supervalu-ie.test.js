@@ -591,6 +591,14 @@ test('supervalu: repeated explicit search override reuses validated store withou
   ]);
 });
 
+test('supervalu: valid alternate unit price survives a malformed primary value', async () => {
+  const payload = jsonFixture('supervalu-gateway.json');
+  payload.items[0].pricePerUnit = 'invalid';
+  payload.items[0].unitPriceText = '€1.28/1 L';
+  const provider = new SuperValuIrelandProvider({storeId:'5550',fetcher:queueFetch([jsonFixture('supervalu-stores.json'),payload])});
+  assert.deepEqual((await provider.search('milk'))[0].unit_price, {price:1.28,measure:'1 L'});
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);

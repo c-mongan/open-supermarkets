@@ -96,9 +96,7 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     product_uid: id,
     name,
     retail_price: { price },
-    unit_price: parseUnitPrice(
-      firstString(item.pricePerUnit, item.unitPrice, item.unitPriceText)
-    ),
+    unit_price: parseUnitPrice(item.pricePerUnit) ?? parseUnitPrice(item.unitPrice) ?? parseUnitPrice(item.unitPriceText),
     in_stock: explicitBooleanState(
       item.available,
       typeof item.outOfStock === 'boolean' ? !item.outOfStock : undefined
