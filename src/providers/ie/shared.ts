@@ -142,21 +142,17 @@ export function explicitBooleanState(...values: unknown[]): boolean | null {
 }
 
 export async function responseText(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return '';
-  }
+  return response.text();
 }
 
 export async function jsonResponse<T>(
   response: Response,
   provider: string
 ): Promise<T> {
-  const text = await responseText(response);
   if (!response.ok) {
     throw new ProviderHttpError(provider, response.status);
   }
+  const text = await responseText(response);
   try {
     return JSON.parse(text) as T;
   } catch {
