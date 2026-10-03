@@ -739,6 +739,32 @@ test('tesco: invalid JSON and GraphQL diagnostics never echo upstream canaries',
   }
 });
 
+test('tesco: HTTP error metadata without status prevents projection fallback', async () => {
+  for(const http of [{headers:{'retry-after':'60'}},null]) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query".',extensions:{http}}]}]],calls)});
+    await rejects(()=>provider.search('milk'), /GraphQL/);assert.equal(calls.length,1);
+  }
+});
+
+test('tesco: caller product identifier canaries never appear in lookup errors', async () => {
+  const canary='accidentally-supplied-private-id-canary';
+  const provider=new TescoIrelandProvider({fetcher:queueFetch([[{data:{product:null}}],[{data:{product:null}}]])});
+  await assert.rejects(()=>provider.getProduct(canary),error=>{assert.match(error.message,/no product returned/);assert.ok(!error.message.includes(canary));return true;});
+  const explicit=new TescoIrelandProvider({fetcher:queueFetch([[{data:{product:null}}]])});
+  await assert.rejects(()=>explicit.getProduct(`tpnb:${canary}`),error=>{assert.match(error.message,/no product returned/);assert.ok(!error.message.includes(canary));return true;});
+});
+
+test('tesco: unpriced rows still validate supplied unit-price fields', async () => {
+  const node={tpnb:'unpriced',title:'Milk',unitPrice:{price:'bad'}};
+  const xapi=jsonFixture('tesco-xapi-search.json');xapi[0].data.search.results.push({node});
+  const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([xapi])});
+  await rejects(()=>provider.search('milk'), /invalid unit price/);
+  const batch=jsonFixture('tesco-hydration.json');batch[0].data.product={...node,tpnb:'7100001'};
+  const index=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([jsonFixture('tesco-index-search.json'),batch])});
+  await rejects(()=>index.search('milk'), /invalid unit price/);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

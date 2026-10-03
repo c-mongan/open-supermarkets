@@ -252,6 +252,7 @@ function mapProduct(node: Record<string, unknown>): Product | undefined {
   const id = firstFieldString('product identity', node.tpnb, node.tpnc, node.id);
   const title = firstFieldString('product name', node.title, node.name);
   const price = productPrice(node);
+  const unit = unitPrice(node);
   if (!id || !title || price === undefined) return undefined;
   const firstSeller = seller(node);
   const promotion = promotionFrom(firstSeller.promotions) ?? promotionFrom(node.promotions);
@@ -268,7 +269,7 @@ function mapProduct(node: Record<string, unknown>): Product | undefined {
     name: title,
     description: firstString(promotion?.description),
     retail_price: { price },
-    unit_price: unitPrice(node),
+    unit_price: unit,
     // isForSale and a positive price prove sale eligibility, not inventory.
     // Current anonymous IE responses omit a usable product stock state.
     in_stock: inStock,
@@ -313,7 +314,7 @@ function isProjectionFailure(messages: readonly string[], envelopes: GraphQLEnve
     // schema fallback. In particular, never retry auth/rate-limit errors.
     if (extensions.code !== undefined && extensions.code !== null &&
         extensions.code !== 'GRAPHQL_VALIDATION_FAILED') return false;
-    return extensions.status === undefined && asRecord(extensions.http).status === undefined;
+    return extensions.status === undefined && extensions.http === undefined;
   });
   return knownValidationCodes && messages.every((message) =>
     !/unauth|authenticat|authorization|forbidden|rate.?limit|throttl|too many requests/i.test(message) &&
@@ -379,7 +380,7 @@ export class TescoIrelandProvider implements GroceryProvider {
       if (product) return product;
       throw new ProviderProtocolError(
         'Tesco Ireland',
-        `no product returned for ${kind.toUpperCase()} ${id}`
+        `no product returned for ${kind.toUpperCase()} identifier`
       );
     }
 
@@ -392,7 +393,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     if (byTpnc) return byTpnc;
     throw new ProviderProtocolError(
       'Tesco Ireland',
-      `no product returned for TPNB or legacy TPNC ${suppliedId}`
+      'no product returned for TPNB or legacy TPNC identifier'
     );
   }
 
@@ -428,7 +429,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     if (!product) {
       throw new ProviderProtocolError(
         'Tesco Ireland',
-        `${kind.toUpperCase()} lookup returned no valid priced product for id ${id}`
+        `${kind.toUpperCase()} lookup returned no valid priced product`
       );
     }
     return product;
