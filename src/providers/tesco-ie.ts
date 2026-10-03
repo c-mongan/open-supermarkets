@@ -248,13 +248,16 @@ function mapProduct(node: Record<string, unknown>): Product | undefined {
 }
 
 function graphQlMessages(value: unknown): string[] {
-  return asRecords(value)
-    .map((error) => compactSnippet(firstString(error.message) ?? 'unknown GraphQL error'));
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return ['malformed GraphQL errors collection'];
+  return value.map(error =>
+    compactSnippet(firstString(asRecord(error).message) ?? 'unknown GraphQL error'));
 }
 
 function isProjectionFailure(messages: readonly string[]): boolean {
   return messages.every((message) =>
-    /cannot query field|unknown field|unknown argument/i.test(message)
+    /(?:cannot query field|unknown field)\s+["']?search["']?(?=[\s.]|$)/i.test(message) ||
+    /unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?(?:Query\.)?search\b/i.test(message)
   );
 }
 
@@ -407,9 +410,22 @@ export class TescoIrelandProvider implements GroceryProvider {
       results.push(...search.results);
     }
     const selectedResults = results.slice(offsetWithinPage, offsetWithinPage + limit);
-    const mappedProducts = selectedResults
-      .map((result) => mapProduct(asRecord(asRecord(result).node)))
-      .filter((product): product is Product => product !== undefined);
+    const mappedProducts: Product[] = [];
+    for (const result of selectedResults) {
+      const node = asRecord(asRecord(result).node);
+      if (!firstString(node.tpnb, node.tpnc, node.id) || !firstString(node.title, node.name)) {
+        throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned a malformed product identity or name');
+      }
+      const product = mapProduct(node);
+      if (product) {
+        mappedProducts.push(product);
+      } else {
+        const regularPrice = asRecord(seller(node).price).actual ?? asRecord(node.price).actual;
+        if (regularPrice !== undefined && regularPrice !== null) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid regular price');
+        }
+      }
+    }
     if (selectedResults.length > 0 && mappedProducts.length === 0) {
       throw new ProviderProtocolError(
         'Tesco Ireland',
@@ -466,17 +482,16 @@ export class TescoIrelandProvider implements GroceryProvider {
       );
     }
     const indexResults = products.results;
-    const tpnbs = asRecords(indexResults)
-      .map((result) => firstString(result.tpnb) ??
-        (firstNumber(result.tpnb) !== undefined ? String(firstNumber(result.tpnb)) : undefined))
-      .filter((tpnb): tpnb is string => tpnb !== undefined)
-      .slice(0, limit);
-    if (indexResults.length > 0 && tpnbs.length === 0) {
-      throw new ProviderProtocolError(
-        'Tesco Ireland search index',
-        'product results contained no stable TPNB identifiers'
-      );
-    }
+    const tpnbs = indexResults.slice(0, limit).map((value) => {
+      const result = asRecord(value);
+      const tpnb = firstString(result.tpnb) ??
+        (typeof result.tpnb === 'number' && Number.isSafeInteger(result.tpnb) && result.tpnb >= 0
+          ? String(result.tpnb) : undefined);
+      if (!tpnb) {
+        throw new ProviderProtocolError('Tesco Ireland search index', 'product results contained no stable TPNB identifiers for a row');
+      }
+      return tpnb;
+    });
     if (tpnbs.length === 0) return [];
 
     const envelopes = await this.executeBatch(

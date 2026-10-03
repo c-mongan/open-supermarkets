@@ -452,7 +452,7 @@ test('tesco: rejects non-empty xapi results when no product can be mapped', asyn
     }]]),
   });
 
-  await rejects(() => provider.search('milk'), /none had a stable ID, name, and numeric price/);
+  await rejects(() => provider.search('milk'), /malformed product identity|none had a stable ID, name, and numeric price/);
 });
 
 test('tesco: rejects non-empty index results without stable TPNB identifiers', async () => {
@@ -506,7 +506,7 @@ test('tesco: rejects malformed, negative, missing, and promotion-only regular pr
   for(const price of ['abc2.29',-1,null,undefined]) {
     const node = {tpnb:'test',title:'Milk',sellers:{results:[{price:{actual:price},promotions:[{price:{afterDiscount:1}}]}]}};
     const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
-    await rejects(()=>provider.search('milk'), /none had a stable ID/);
+    await rejects(()=>provider.search('milk'), /invalid regular price|none had a stable ID/);
   }
 });
 
@@ -543,7 +543,7 @@ test('tesco: HTTP upstream failures stop without another transport', async () =>
 test('tesco: display-only prices are not assumed to be regular prices', async () => {
   const node={tpnb:'test',title:'Milk',displayPrice:{value:1}};
   const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
-  await rejects(()=>provider.search('milk'), /none had a stable ID/);
+  await rejects(()=>provider.search('milk'), /invalid regular price|none had a stable ID/);
 });
 
 test('tesco: generic validation errors do not allow projection fallback', async () => {
@@ -586,6 +586,48 @@ test('tesco: malformed or invalidly priced hydration rows are not skipped silent
     const batch=jsonFixture('tesco-hydration.json');batch[0]={data:{product:malformed}};
     const provider=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([jsonFixture('tesco-index-search.json'),batch])});
     await rejects(()=>provider.search('milk'), /hydration failed/);
+  }
+});
+
+test('tesco: shared product-schema failures do not trigger index fallback', async () => {
+  for(const message of ['Cannot query field "sellers" on type "ProductType".', 'Cannot query field "details" on type "ProductType".', 'Unknown argument "tpnb" on field "Query.product".']) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message}]}]],calls)});
+    await rejects(()=>provider.search('milk'), /Cannot query field|Unknown argument/);
+    assert.equal(calls.length,1);
+  }
+});
+
+test('tesco: malformed xapi rows cannot hide behind valid products', async () => {
+  for(const node of [{title:'Missing ID',price:{actual:1}},{tpnb:'bad',title:'Milk',price:{actual:'bad2'}},null]) {
+    const batch=jsonFixture('tesco-xapi-search.json');batch[0].data.search.results.push({node});
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([batch])});
+    await rejects(()=>provider.search('milk'), /malformed product|invalid regular price/);
+  }
+});
+
+test('tesco: ordinary unpriced xapi rows can be omitted beside usable products', async () => {
+  const batch=jsonFixture('tesco-xapi-search.json');batch[0].data.search.results.push({node:{tpnb:'unpriced',title:'Milk'}});
+  const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([batch])});
+  const products=await provider.search('milk');assert.equal(products.length,2);
+});
+
+test('tesco: mixed malformed index identifiers fail before hydration', async () => {
+  for(const row of [{title:'Missing ID'},null,{tpnb:1.5}]) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({strategy:'index',fetcher:queueFetch([{ie:{ghs:{products:{results:[{tpnb:'valid'},row]}}}}],calls)});
+    await rejects(()=>provider.search('milk'), /no stable TPNB/);
+    assert.equal(calls.length,1);
+  }
+});
+
+test('tesco: malformed GraphQL errors cannot be ignored beside valid data', async () => {
+  for(const errors of ['malformed',[null]]) {
+    const batch=jsonFixture('tesco-xapi-search.json');batch[0].errors=errors;
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([batch],calls)});
+    await rejects(()=>provider.search('milk'), /malformed GraphQL|unknown GraphQL/);
+    assert.equal(calls.length,1);
   }
 });
 

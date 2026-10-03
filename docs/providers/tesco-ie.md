@@ -13,8 +13,8 @@ node dist/cli.js search milk --provider tesco-ie --limit 2 --json
 node -e "new (require('./dist/providers/tesco-ie').TescoIrelandProvider)().getProduct('81245658').then(console.log)"
 ```
 
-Search tries xapi first. Only a GraphQL field/projection error permits the bounded
-index fallback. The index supplies TPNBs; xapi supplies names and regular EUR
+Search tries xapi first. Only a GraphQL error on the Search root field or its arguments permits the
+bounded index fallback. Shared product-schema errors stop without a fallback. The index supplies TPNBs; xapi supplies names and regular EUR
 prices. HTTP 401/403/429, malformed responses, and other GraphQL errors stop the
 request. Requests have a 20-second timeout. The public key can rotate; set
 `SUPERMARKET_TESCO_IE_API_KEY` to a current public web key when it does.
