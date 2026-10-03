@@ -64,7 +64,7 @@ export const PROVIDERS: ProviderManifest[] = [
     auth: 'none',
     tier: 'community',
     maintainer: 'c-mongan',
-    credit: 'Grocery gateway protocol independently verified against the Ireland storefront',
+    credit: 'Protocol research from but3k4/supermarket-mcp (MIT), independently verified against the Irish grocery gateway',
     load: async () => (await import('./dunnes-ie')).DunnesIrelandProvider,
   },
   {
