@@ -14,6 +14,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createProvider, PROVIDERS } from '../src/providers/registry';
+import { ProviderInputError } from '../src/provider-errors';
 import { batchSearch } from '../src/batch';
 import {
   StoreRoutingError,
@@ -94,7 +95,8 @@ async function helpers(): Promise<void> {
   });
 
   await test('clientErrorStatus maps provider input errors to 400 and leaves faults alone', () => {
-    assert.equal(clientErrorStatus(Object.assign(new Error('x'), { name: 'ProviderInputError' })), 400);
+    assert.equal(clientErrorStatus(new ProviderInputError('fake-stores', 'x')), 400);
+    assert.equal(clientErrorStatus(Object.assign(new Error('spoofed'), { name: 'ProviderInputError' })), undefined);
     assert.equal(clientErrorStatus(new StoreRoutingError('unsupported', 'x')), 501);
     assert.equal(clientErrorStatus(new Error('boom')), undefined);
   });
@@ -306,6 +308,29 @@ async function mcpRoutes(): Promise<void> {
       assert.equal(r.isError, false, r.text);
       assert.deepEqual(Object.keys(JSON.parse(r.text)), ['provider', 'results']);
       assert.deepEqual(events.searches[0].options, { limit: 5 });
+    });
+
+    await test('store-only providers reject legacy operations before construction', async () => {
+      for (const name of ['grocery_login', 'grocery_basket', 'grocery_basket_add_batch']) {
+        const r = await call(name, { provider: 'fake-stores', items: [{ id: '1' }] });
+        assert.equal(r.isError, true, r.text);
+        assert.match(r.text, /does not support/);
+        assert.doesNotMatch(r.text, /constructor|Not logged in/);
+      }
+    });
+
+    await test('authenticated store lookup keeps the login gate', async () => {
+      const manifest = PROVIDERS.find((m) => m.id === 'fake-stores')!;
+      const originalAuth = manifest.auth;
+      try {
+        manifest.auth = 'credentials';
+        const r = await call('grocery_stores', { provider: 'fake-stores' });
+        assert.equal(r.isError, true, r.text);
+        assert.match(r.text, /Not logged in to fake-stores/);
+        assert.equal(events.listStores.length, 0);
+      } finally {
+        manifest.auth = originalAuth;
+      }
     });
 
     await test('bad input and unsupported providers are tool errors, before network', async () => {

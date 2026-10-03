@@ -430,6 +430,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const providerName = ((args as any).provider || 'sainsburys') as ProviderName;
 
   try {
+    // Search-only providers cannot use the legacy authenticated operations.
+    // Reject before constructing a provider or making a retailer request.
+    const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
+    const storeTool = name === 'grocery_stores';
+    if (storeTool) assertStoresSupported(providerName);
+    const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
+    if (!catalogueTool && !storeTool && !globalTool &&
+        getManifest(providerName).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
+      return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);
+    }
+    if (!globalTool && name !== 'grocery_login' &&
+        ((!catalogueTool && !storeTool) || !searchesAnonymously(providerName))) {
+      const loginError = requireLogin(providerName);
+      if (loginError) return textResult(loginError, true);
+    }
+
     // ── grocery_login ──
     if (name === 'grocery_login') {
       const { email, password } = args as { email: string; password: string };
@@ -524,7 +540,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = searchesAnonymously(providerName) ? null : requireLogin(providerName);
+    const loginError = catalogueTool && searchesAnonymously(providerName) ? null : requireLogin(providerName);
 
     // ── grocery_search ──
     if (name === 'grocery_search') {

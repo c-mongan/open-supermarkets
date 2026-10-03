@@ -15,6 +15,7 @@
  * search means one caller's store can never leak into another's results.
  */
 
+import { ProviderInputError } from './provider-errors';
 import { MissingCapabilityError, UnknownProviderError, supports } from './providers/registry';
 import type {
   GroceryProvider,
@@ -189,13 +190,12 @@ export function parseStoreSearchOptions(
 
 /**
  * Status for an error that should not be reported as a server failure.
- * Providers signal bad caller input with an error named `ProviderInputError`;
- * matching by name keeps this module free of provider-specific imports.
+ * Provider input errors use a shared class. Error names do not establish type.
  */
 export function clientErrorStatus(error: unknown): 400 | 501 | undefined {
   if (error instanceof StoreRoutingError) return error.statusCode;
   if (error instanceof MissingCapabilityError) return 501;
   if (error instanceof UnknownProviderError) return 400;
-  if ((error as { name?: unknown } | null)?.name === 'ProviderInputError') return 400;
+  if (error instanceof ProviderInputError) return 400;
   return undefined;
 }

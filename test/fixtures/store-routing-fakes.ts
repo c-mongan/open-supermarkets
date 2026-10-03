@@ -4,6 +4,7 @@
  * providers' loaders are wrapped so a test can prove they never ran, and
  * global fetch is replaced with a counter that refuses to make requests.
  */
+import { ProviderInputError } from '../../src/provider-errors';
 import { PROVIDERS } from '../../src/providers/registry';
 import type {
   Product,
@@ -69,7 +70,7 @@ class FakeStoreProvider {
 
   async selectStore(storeId: string): Promise<void> {
     if (storeId === 'bad') {
-      throw Object.assign(new Error('unknown store'), { name: 'ProviderInputError' });
+      throw new ProviderInputError(this.name, 'unknown store');
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
     events.selects.push({ instance: this.instance, storeId, at: ++clock });

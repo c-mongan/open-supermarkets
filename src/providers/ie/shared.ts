@@ -1,3 +1,5 @@
+export { ProviderInputError } from '../../provider-errors';
+
 export type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit
@@ -6,17 +8,11 @@ export type FetchLike = (
 export class ProviderHttpError extends Error {
   readonly status: number;
   readonly provider: string;
-  readonly bodySnippet: string;
-
-  constructor(provider: string, status: number, bodySnippet = '') {
-    super(
-      `${provider} request failed (HTTP ${status})` +
-        (bodySnippet ? `: ${bodySnippet}` : '')
-    );
+  constructor(provider: string, status: number) {
+    super(`${provider} request failed (HTTP ${status})`);
     this.name = 'ProviderHttpError';
     this.status = status;
     this.provider = provider;
-    this.bodySnippet = bodySnippet;
   }
 }
 
@@ -97,11 +93,23 @@ export function asString(value: unknown): string | undefined {
 export function asNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return undefined;
-  const normalized = value
-    .replace(/\s/g, '')
-    .replace(/[^0-9,.-]/g, '')
-    .replace(',', '.');
-  if (!normalized) return undefined;
+  // Accept one complete amount, optionally with a currency marker. Never
+  // remove arbitrary words: promotional text is not a regular price.
+  const match = value.trim().match(
+    /^(?:(?:[€£$]|EUR|GBP|USD)\s*([+-]?[\d.,]+)|([+-]?[\d.,]+)\s*(?:[€£$]|EUR|GBP|USD)|([+-]?[\d.,]+))$/i
+  );
+  if (!match) return undefined;
+  const amount = match[1] ?? match[2] ?? match[3];
+  let normalized: string;
+  if (/^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(amount)) {
+    normalized = amount.replace(/,/g, '');
+  } else if (/^[+-]?\d{1,3}(?:\.\d{3})+,\d+$/.test(amount)) {
+    normalized = amount.replace(/\./g, '').replace(',', '.');
+  } else if (/^[+-]?\d+(?:[.,]\d+)?$/.test(amount)) {
+    normalized = amount.replace(',', '.');
+  } else {
+    return undefined;
+  }
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -147,14 +155,14 @@ export async function jsonResponse<T>(
 ): Promise<T> {
   const text = await responseText(response);
   if (!response.ok) {
-    throw new ProviderHttpError(provider, response.status, compactSnippet(text));
+    throw new ProviderHttpError(provider, response.status);
   }
   try {
     return JSON.parse(text) as T;
   } catch {
     throw new ProviderProtocolError(
       provider,
-      `expected JSON but received ${compactSnippet(text) || 'an empty body'}`
+      text ? 'expected JSON but received an invalid response' : 'expected JSON but received an empty body'
     );
   }
 }
