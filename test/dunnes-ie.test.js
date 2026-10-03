@@ -508,7 +508,10 @@ test('dunnes: registration exposes the tested provider capabilities and construc
   assert.equal(manifest.tier,'community');
   assert.equal(manifest.maintainer,'c-mongan');
   assert.deepEqual(manifest.capabilities,['search','stores']);
-  assert.ok(await createProvider('dunnes-ie') instanceof DunnesIrelandProvider);
+  const provider=await createProvider('dunnes-ie');
+  assert.equal(provider.name,'dunnes-ie');
+  assert.equal(provider.constructor.name,'DunnesIrelandProvider');
+  for(const method of ['search','listStores','selectStore']) assert.equal(typeof provider[method],'function');
   assert.throws(()=>ProviderFactory.create('dunnes-ie'),/no synchronous constructor/);
 });
 
@@ -563,6 +566,70 @@ test('dunnes: the latest explicit store selection wins when validations finish o
   finishFirst(); await first;
   await p.search('bread');
   assert.equal(calls[calls.length-1].pathname,'/api/stores/412/search');
+});
+
+test('dunnes: request deadlines cover stalled fetch and stalled response bodies', async () => {
+  for(const stage of ['fetch','body']) {
+    let signal;
+    const p=new DunnesIrelandProvider({requestTimeoutMs:15,fetcher:async (_input,init)=>{
+      signal=init.signal;
+      if(stage==='fetch') return new Promise(()=>{});
+      return {ok:true,status:200,text:()=>new Promise(()=>{})};
+    }});
+    await assert.rejects(()=>p.listStores(),/Dunnes Ireland stores request timed out after 15 ms/);
+    assert.equal(signal.aborted,true);
+  }
+});
+
+test('dunnes: search response body timeout releases a shared validation context safely', async () => {
+  let count=0;
+  const p=new DunnesIrelandProvider({storeId:'258',requestTimeoutMs:15,fetcher:async()=>{
+    if(++count===1) return response(jsonFixture('dunnes-stores.json'));
+    return {ok:true,status:200,text:()=>new Promise(()=>{})};
+  }});
+  await assert.rejects(()=>p.search('bread'),/Dunnes Ireland gateway request timed out after 15 ms/);
+});
+
+test('dunnes: invalid returned coordinates remain unknown', async () => {
+  for(const location of [{latitude:91,longitude:0},{latitude:0,longitude:-181},{latitude:'invalid',longitude:0}]) {
+    const p=new DunnesIrelandProvider({fetcher:queueFetch([{items:[{
+      retailerStoreId:'258',name:'Beacon Court',currency:'EUR',shoppingModes:['Delivery'],location
+    }]}])});
+    assert.equal((await p.listStores())[0].location,undefined);
+  }
+});
+
+test('dunnes: direct search store overrides are verified without changing selection', async () => {
+  const calls=[];
+  const p=new DunnesIrelandProvider({fetcher:queueFetch([
+    jsonFixture('dunnes-stores.json'),
+    {items:[{retailerStoreId:'412',name:'Jetland',currency:'EUR',shoppingModes:['Delivery']}]},
+    jsonFixture('dunnes-gateway.json'),jsonFixture('dunnes-gateway.json')
+  ],calls)});
+  await p.selectStore('258');
+  await p.search('bread',{storeId:'412'});
+  await p.search('bread');
+  assert.equal(new URL(calls[1].url).searchParams.get('RetailerStoreId'),'412');
+  assert.equal(new URL(calls[2].url).pathname,'/api/stores/412/search');
+  assert.equal(new URL(calls[3].url).pathname,'/api/stores/258/search');
+});
+
+test('dunnes: direct store overrides cannot bypass validation or mutate an absent selection', async () => {
+  const calls=[];
+  const p=new DunnesIrelandProvider({fetcher:queueFetch([
+    jsonFixture('dunnes-stores.json'),jsonFixture('dunnes-gateway.json'),{items:[]}
+  ],calls)});
+  await p.search('bread',{storeId:'258'});
+  await assert.rejects(()=>p.search('bread'),/store-scoped/);
+  await assert.rejects(()=>p.search('bread',{storeId:'999'}),/not found/);
+  await assert.rejects(()=>p.search('bread',{storeId:' '}),/non-empty/);
+  assert.equal(calls.length,3);
+});
+
+test('dunnes: request deadlines reject unsupported timer values before networking', async () => {
+  for(const requestTimeoutMs of [0,-1,1.5,NaN,Infinity,2147483648]) {
+    assert.throws(()=>new DunnesIrelandProvider({requestTimeoutMs,fetcher:queueFetch([])}),/requestTimeoutMs/);
+  }
 });
 
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });

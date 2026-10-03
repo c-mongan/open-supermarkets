@@ -22,7 +22,9 @@ JS
 `DUNNES_IE_STORE_ID` or the constructor `storeId` can supply the store ID. The
 provider verifies it before the first search. Concurrent searches for the same
 store share one pending validation request. A failed request can be retried.
-Concurrent explicit selections retain the latest requested store. An optional user-owned cookie can
+Concurrent explicit selections retain the latest requested store.
+A direct `search(query, { storeId })` override is verified for that request and
+does not change the selected store. An optional user-owned cookie can
 be supplied at runtime with `SUPERMARKET_DUNNES_IE_COOKIE_HEADER`. Anonymous
 store discovery and search do not require it. Never publish cookies.
 
@@ -58,7 +60,8 @@ not returned; an entirely invalid non-empty collection is an error.
 Store text and postcode filters run locally after bounded pagination (maximum
 10 pages of 100 stores). Nearby lookup uses the retailer endpoint and accepts
 coordinates, range, and pickup/delivery mode. It cannot be combined with text,
-postcode, or offset filters. Default HTTP requests have a 20-second timeout.
+postcode, or offset filters. All HTTP requests have a 20-second deadline, including response body parsing.
+Invalid returned coordinates remain absent.
 
 Use the asynchronous registry `createProvider('dunnes-ie')` for integration.
 The legacy full-service synchronous factory does not support this provider.

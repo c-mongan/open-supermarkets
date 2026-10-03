@@ -54,6 +54,8 @@ export interface DunnesIrelandOptions {
   /** Optional user-owned runtime session cookie for the grocery gateway. */
   cookieHeader?: string;
   gatewayBase?: string;
+  /** Complete request deadline, including response body parsing. Defaults to 20 seconds. */
+  requestTimeoutMs?: number;
 }
 
 function priceNumber(value: unknown): number | undefined {
@@ -140,7 +142,8 @@ function gatewayStore(item: Record<string, unknown>): Store | undefined {
     postcode: firstString(field(item, 'postCode'), field(item, 'postcode'))?.toUpperCase(),
     address: address || undefined,
     location:
-      latitude !== undefined && longitude !== undefined
+      latitude !== undefined && longitude !== undefined &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
         ? { latitude, longitude }
         : undefined,
     shopping_modes: normalizedModes(field(item, 'shoppingModes')),
@@ -262,9 +265,14 @@ export class DunnesIrelandProvider implements GroceryProvider {
   private readonly storeValidations = new Map<string, Promise<void>>();
   private readonly cookieHeader?: string;
   private readonly gatewayBase: string;
+  private readonly requestTimeoutMs: number;
 
   constructor(options: DunnesIrelandOptions = {}) {
-    this.fetcher = options.fetcher ?? ((input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(20000) }));
+    this.fetcher = options.fetcher ?? fetch;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 20000;
+    if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs <= 0 || this.requestTimeoutMs > 2147483647) {
+      throw new ProviderInputError('Dunnes Ireland', 'requestTimeoutMs must be an integer from 1 to 2147483647');
+    }
     const storeId = options.storeId ?? env('DUNNES_IE_STORE_ID');
     this.storeId = storeId === undefined ? undefined : normalizedStoreId(storeId);
     this.cookieHeader =
@@ -273,6 +281,31 @@ export class DunnesIrelandProvider implements GroceryProvider {
       env('SUPERMARKET_DUNNES_IE_COOKIE') ??
       env('DUNNES_IE_COOKIE');
     this.gatewayBase = options.gatewayBase ?? GATEWAY_BASE;
+  }
+
+  private async requestJson(input: URL, init: RequestInit, provider: string): Promise<unknown> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMessage = `${provider} request timed out after ${this.requestTimeoutMs} ms`;
+    const deadline = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error(timeoutMessage));
+      }, this.requestTimeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => jsonResponse<unknown>(
+          await this.fetcher(input, { ...init, signal: controller.signal }), provider
+        ))(),
+        deadline,
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(timeoutMessage);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
@@ -320,9 +353,8 @@ export class DunnesIrelandProvider implements GroceryProvider {
       if (selection.latitude === undefined && localFilter && skip > 0) {
         pageUrl.searchParams.set('Skip', String(skip));
       }
-      const payload = await jsonResponse<unknown>(
-        await this.fetcher(pageUrl, { headers: { Accept: 'application/json' } }),
-        'Dunnes Ireland stores'
+      const payload = await this.requestJson(
+        pageUrl, { headers: { Accept: 'application/json' } }, 'Dunnes Ireland stores'
       );
       const root = asRecord(payload);
       const source = field(root, 'items');
@@ -445,7 +477,9 @@ export class DunnesIrelandProvider implements GroceryProvider {
     query: string,
     options: SearchOptions
   ): Promise<Product[]> {
-    const storeId = this.storeId;
+    const storeId = options.storeId === undefined
+      ? this.storeId
+      : normalizedStoreId(options.storeId);
     if (!storeId) {
       throw new ProviderInputError('Dunnes Ireland',
         'Dunnes gateway search is store-scoped. Set DUNNES_IE_STORE_ID or pass storeId.'
@@ -468,8 +502,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
     url.searchParams.set('take', String(limit));
     url.searchParams.set('skip', String(offset));
 
-    const payload = await jsonResponse<unknown>(
-      await this.fetcher(url, {
+    const payload = await this.requestJson(url, {
         headers: {
           Accept: 'application/json',
           'x-site-host': SITE_URL,
@@ -480,8 +513,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
           Referer: `${SITE_URL}/`,
           ...(this.cookieHeader ? { Cookie: this.cookieHeader } : {}),
         },
-      }),
-      'Dunnes Ireland gateway'
+      }, 'Dunnes Ireland gateway'
     );
     const root = asRecord(payload);
     const redirect = asRecord(asRecord(root._links).redirect);
