@@ -809,6 +809,17 @@ test('tesco: search-only provider loads through async registry, not full-service
   assert.throws(()=>ProviderFactory.create('tesco-ie'),/no synchronous constructor/);
 });
 
+test('tesco: numeric HTTP errors and arbitrary suffixes never permit fallback', async () => {
+  for(const suffix of ['HTTP 401','HTTP 403','HTTP 429','retailer unavailable']) {
+    for(const prefix of ['Cannot query field "search" on type "Query".', 'Unknown argument "count" on field "Query.search".']) {
+      const calls=[];
+      const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:`${prefix} ${suffix}`}]}]],calls)});
+      await rejects(()=>provider.search('milk'), /authentication|rate limited|GraphQL upstream/);
+      assert.equal(calls.length,1);
+    }
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

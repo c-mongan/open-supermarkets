@@ -318,9 +318,9 @@ function isProjectionFailure(messages: readonly string[], envelopes: GraphQLEnve
     return extensions.status === undefined && extensions.http === undefined;
   });
   return knownValidationCodes && messages.every((message) =>
-    !/unauth|authenticat|authorization|forbidden|rate.?limit|throttl|too many requests/i.test(message) &&
-    (/^(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?(?=[\s.]|$)/i.test(message) ||
-    /^unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search\b/i.test(message))
+    !/unauth|authenticat|authorization|forbidden|rate.?limit|throttl|too many requests|\b(?:401|403|429)\b/i.test(message) &&
+    (/^(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?\.?\s*$/i.test(message) ||
+    /^unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search["']?\.?\s*$/i.test(message))
   );
 }
 
