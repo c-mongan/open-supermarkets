@@ -149,11 +149,11 @@ test('mrprice: rejects a challenge page that lacks the search results grid', asy
   await rejects(() => provider.search('milk'), /search results grid/);
 });
 
-test('mrprice: accepts a credible empty HTML search grid', async () => {
+test('mrprice: accepts retailer no-results state without a search grid', async () => {
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
       { resources: { results: { products: [] } } },
-      '<main><div id="js-product-ajax"></div></main>',
+      '<main><div class="collection-nomatch-text"><p>No results found</p></div></main>',
     ]),
   });
 
@@ -401,6 +401,17 @@ test('mrprice: chooses visible product name after an untitled image link', async
 test('mrprice: ignores unrelated same-query page links outside pager controls', async () => {
   const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=milk&amp;page=2">Related milk</a>';
   assert.equal((await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2})).length,1);
+});
+
+
+test('mrprice: rejects unrecognized or empty grids without a genuine no-results message', async () => {
+  for(const html of ['<div id="js-product-ajax"><div class="new-product-layout">Item EUR1.99</div></div>','<div id="js-product-ajax">CAPTCHA challenge</div>','<div id="js-product-ajax"></div>']) {
+    await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk'), /no recognized products or genuine no-results message/);
+  }
+});
+
+test('mrprice: does not mistake an arbitrary no-results phrase for retailer state', async () => {
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},'<div id="js-product-ajax">No results found</div>'])}).search('milk'), /no recognized products or genuine no-results message/);
 });
 
 async function main() {

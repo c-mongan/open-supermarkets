@@ -187,6 +187,12 @@ function elementContent(html: string, marker: RegExpMatchArray, label: string): 
   );
 }
 
+function hasNoResultsMessage(html: string): boolean {
+  return [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
+    .filter(match => hasClass(match[0], 'collection-nomatch-text'))
+    .some(marker => htmlText(elementContent(html, marker, 'no-results message')) === 'No results found');
+}
+
 function parseHtmlProducts(
   html: string,
   baseUrl: string,
@@ -194,10 +200,20 @@ function parseHtmlProducts(
   offset: number,
   query: string
 ): Product[] {
-  const grid = extractSearchGrid(html);
+  let grid: string;
+  try {
+    grid = extractSearchGrid(html);
+  } catch (error) {
+    if (error instanceof ProviderProtocolError && error.message.includes('did not contain the search results grid') && hasNoResultsMessage(html)) return [];
+    throw error;
+  }
   const starts = [...grid.matchAll(/<[^>]+>/g)]
     .filter(match => hasClass(match[0], 'product-card'))
     .map(match => match.index!);
+  if (starts.length === 0) {
+    if (hasNoResultsMessage(html)) return [];
+    throw new ProviderProtocolError('Mr Price Ireland', 'HTML grid contained no recognized products or genuine no-results message');
+  }
   const cards = starts.map((start, index) =>
     grid.slice(start, starts[index + 1] ?? grid.length)
   );
