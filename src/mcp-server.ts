@@ -433,6 +433,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Search-only providers cannot use the legacy authenticated operations.
     // Reject before constructing a provider or making a retailer request.
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
+    if (catalogueTool) prepareStoreId(providerName, (args as any).store_id);
     const storeTool = name === 'grocery_stores';
     if (storeTool) assertStoresSupported(providerName);
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
@@ -442,7 +443,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
     if (!globalTool && name !== 'grocery_login' &&
         ((!catalogueTool && !storeTool) || !searchesAnonymously(providerName))) {
-      const loginError = requireLogin(providerName);
+      // Registry integrations handle their configured credentials in their own
+      // methods. Only legacy integrations use these four session files.
+      const loginError = (catalogueTool || storeTool) && SESSION_PATHS[providerName] === undefined
+        ? null : requireLogin(providerName);
       if (loginError) return textResult(loginError, true);
     }
 
@@ -540,7 +544,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = catalogueTool && searchesAnonymously(providerName) ? null : requireLogin(providerName);
+    const loginError = catalogueTool &&
+      (searchesAnonymously(providerName) || SESSION_PATHS[providerName] === undefined)
+      ? null : requireLogin(providerName);
 
     // ── grocery_search ──
     if (name === 'grocery_search') {
