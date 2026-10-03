@@ -328,7 +328,7 @@ export class MrPriceIrelandProvider implements GroceryProvider {
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
     if (options.category) throw new ProviderInputError('Mr Price Ireland', 'category filtering is unsupported');
     const normalizedQuery = requireQuery(query);
-    const limit = clampLimit(options.limit, 10, 20);
+    const limit = clampLimit(options.limit, 10, 10);
     const offset = clampOffset(options.offset);
     if (offset !== 0) {
       throw new ProviderInputError('Mr Price Ireland', 'pagination is unsupported; offset must be zero');

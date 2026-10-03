@@ -456,6 +456,18 @@ test('mrprice: hidden word in a quoted title is not a hidden attribute', async (
   assert.equal(product.name,'Find hidden gems 1L');
 });
 
+test('mrprice: caps default24 and explicit20 at ten without a forced HTML request', async () => {
+  const payload={resources:{results:{products:Array.from({length:10},(_,i)=>({title:`Item ${i}`,price:'1.99',url:`/products/item-${i}`,available:true}))}}};
+  for(const options of [{},{limit:24},{limit:20}]) {
+    const calls=[];
+    const products=await new MrPriceIrelandProvider({fetcher:queueFetch([payload,{body:'limited',status:429}],calls)}).search('item',options);
+    assert.equal(products.length,10);
+    assert.equal(calls.length,1);
+    assert.equal(new URL(calls[0].url).searchParams.get('resources[limit]'),'10');
+    assert.deepEqual(products.map(p=>p.product_uid),payload.resources.results.products.map(p=>`https://www.mrprice.online${p.url}`));
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
