@@ -57,6 +57,7 @@ function canonicalProductUrl(baseUrl: string, value: unknown): string | undefine
   const absolute = absoluteUrl(baseUrl, value);
   if (!absolute) return undefined;
   const url = new URL(absolute);
+  if (url.origin !== new URL(baseUrl).origin || url.username || url.password) return undefined;
   const product = url.pathname.match(/\/products\/([^/]+)\/?$/);
   if (!product) return undefined;
   url.pathname = `/products/${product[1]}`;

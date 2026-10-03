@@ -363,6 +363,14 @@ test('mrprice: surfaces fallback errors after short predictive response', async 
   await rejects(() => provider.search('milk',{limit:10}), /HTTP 429/);
 });
 
+
+test('mrprice: rejects product links outside configured storefront', async () => {
+  const payload={resources:{results:{products:[{title:'Item',price:'1.99',url:'https://other.example/products/item'}]}}};
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([payload])}).search('item',{limit:1}), /no valid products/);
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="https://other.example/products/item">Item</a></div></div>';
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1}), /no valid products/);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
