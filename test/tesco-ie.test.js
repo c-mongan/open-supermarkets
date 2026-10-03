@@ -765,6 +765,27 @@ test('tesco: unpriced rows still validate supplied unit-price fields', async () 
   await rejects(()=>index.search('milk'), /invalid unit price/);
 });
 
+test('tesco: search skips only explicit non-product GraphQL projections', async () => {
+  const product=jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;
+  const nonProduct={__typename:'RecipeType'};
+  for (const nodes of [[nonProduct,product],[product,nonProduct],[nonProduct]]) {
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:nodes.map(node=>({node}))}}}]])});
+    const products=await provider.search('milk');
+    assert.equal(products.length,nodes.includes(product)?1:0);
+  }
+  const future={...product,__typename:'FutureProductSubtype',productType:'FutureProductSubtype'};
+  const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node:future}]}}}]])});
+  assert.equal((await provider.search('milk'))[0].product_uid,'7001000');
+});
+
+test('tesco: marked products and malformed type markers stay strict', async () => {
+  const product=jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;
+  for(const node of [{__typename:'ProductType',productType:'ProductType'}, {...product,productType:undefined}, {...product,productType:42}, {...product,__typename:42}]) {
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node:product},{node}]}}}]])});
+    await rejects(()=>provider.search('milk'), /malformed product identity|invalid product type marker|invalid node type/);
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

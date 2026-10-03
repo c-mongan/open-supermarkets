@@ -59,6 +59,7 @@ query Search($query: String!, $page: Int = 1, $count: Int) {
       node {
         __typename
         ... on ProductInterface {
+          productType: __typename
           tpnc
           tpnb
           gtin
@@ -473,8 +474,25 @@ export class TescoIrelandProvider implements GroceryProvider {
     }
     const selectedResults = results.slice(offsetWithinPage, offsetWithinPage + limit);
     const mappedProducts: Product[] = [];
+    let productRows = 0;
     for (const result of selectedResults) {
       const node = asRecord(asRecord(result).node);
+      // The alias occurs only inside ProductInterface, so it identifies products
+      // without a hard-coded list of concrete GraphQL product types.
+      if (node.__typename !== undefined) {
+        if (typeof node.__typename !== 'string' || !node.__typename.trim()) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid node type');
+        }
+        if (node.productType === undefined && Object.keys(node).every(key => key === '__typename')) {
+          continue;
+        }
+        if (node.productType !== node.__typename) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid product type marker');
+        }
+      } else if (node.productType !== undefined) {
+        throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid product type marker');
+      }
+      productRows += 1;
       if (!firstFieldString('product identity', node.tpnb, node.tpnc, node.id) || !firstFieldString('product name', node.title, node.name)) {
         throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned a malformed product identity or name');
       }
@@ -488,7 +506,7 @@ export class TescoIrelandProvider implements GroceryProvider {
         }
       }
     }
-    if (selectedResults.length > 0 && mappedProducts.length === 0) {
+    if (productRows > 0 && mappedProducts.length === 0) {
       throw new ProviderProtocolError(
         'Tesco Ireland',
         'xapi Search returned products but none had a stable ID, name, and numeric price'

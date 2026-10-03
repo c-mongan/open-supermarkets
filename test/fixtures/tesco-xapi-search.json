@@ -6,6 +6,7 @@
           {
             "node": {
               "__typename": "ProductType",
+              "productType": "ProductType",
               "tpnc": "7001001",
               "tpnb": "7001000",
               "gtin": "05000000000001",
@@ -29,6 +30,7 @@
           {
             "node": {
               "__typename": "ProductType",
+              "productType": "ProductType",
               "tpnc": "7001002",
               "title": "Tesco Skimmed Milk 1L",
               "isForSale": false,
