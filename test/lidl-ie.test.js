@@ -286,3 +286,41 @@ test('Lidl identifies a direct response-body timeout error', async () => {
   } });
   await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out after 15000 ms/);
 });
+
+
+test('Lidl accepts unambiguous grouped EUR amounts', async () => {
+  for (const price of ['€1,299.00', '€1.299,00']) {
+    const payload = { items: [{ gridbox: { data: { id: 'grouped', fullTitle: 'Milk', price: { price } } } }] };
+    const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+    assert.equal(product.retail_price.price, 1299);
+  }
+});
+
+test('Lidl preserves numeric catalogue identity before its canonical URL', async () => {
+  for (const field of ['id', 'productId', 'code']) {
+    const payload = { items: [{ gridbox: { data: {
+      [field]: 11143576, fullTitle: 'Milk', canonicalUrl: '/p/milk/p11143576', price: { price: 2.79 },
+    } } }] };
+    const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+    assert.equal(product.product_uid, '11143576');
+  }
+});
+
+test('Lidl rejects malformed present regional prices for conditional offers too', async () => {
+  for (const currentPrice of [null, {}, [], 'bad', { price: 'bad' }, { price: -1 }]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'bad-conditional', fullTitle: 'Milk', price: {
+        price: 1.50, oldPrice: 2.79, discount: { discountText: '2 for €3' },
+      }, regionsPrices: { '1': { currentPrice } },
+    } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});
+
+test('Lidl omits generic unit price when the selected regional shelf price differs', async () => {
+  const payload = fixture();
+  payload.items[0].gridbox.data.regionsPrices['1'].currentPrice.price = 3.25;
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 3.25);
+  assert.equal(product.unit_price, undefined);
+});
