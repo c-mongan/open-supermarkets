@@ -65,12 +65,14 @@ function mapPredictiveProduct(
     ? String(item.id) : firstString(item.id, item.handle, url)!;
   const soldOut = Array.isArray(item.tags) && item.tags.some(tag =>
     typeof tag === 'string' && /^(?:out of stock|sold out)$/i.test(tag));
+  let inStock: boolean | null = null;
+  if (soldOut && item.available !== true) inStock = false;
+  else if (!soldOut && typeof item.available === 'boolean') inStock = item.available;
   return {
     product_uid: id,
     name,
     retail_price: { price },
-    in_stock: soldOut ? (item.available === true ? null : false)
-      : typeof item.available === 'boolean' ? item.available : null,
+    in_stock: inStock,
     size: name.match(/\b\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|pack)(?:\b|$)/i)?.[0],
     image_url: absoluteUrl(
       baseUrl,
@@ -93,7 +95,8 @@ function hasClass(tag: string, name: string): boolean {
 }
 
 function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
-  const anchors = [...card.matchAll(/<a\b[^>]*href=["'][^"']*\/products\/[^"']+["'][^>]*>/gi)];
+  const anchors = [...card.matchAll(/<a\b[^>]*>/gi)]
+    .filter(match => extractAttribute(match[0], 'href')?.includes('/products/'));
   const anchorMatch = anchors.find(match => extractAttribute(match[0], 'title')) ?? anchors[0];
   const anchor = anchorMatch?.[0];
   const anchorStart = anchorMatch?.index;
@@ -142,9 +145,8 @@ function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
 }
 
 function extractSearchGrid(html: string): string {
-  const marker = html.match(
-    /<([a-z][\w:-]*)\b[^>]*\bid\s*=\s*["']js-product-ajax["'][^>]*>/i
-  );
+  const marker = [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
+    .find(match => extractAttribute(match[0], 'id') === 'js-product-ajax');
   if (!marker || marker.index === undefined) {
     throw new ProviderProtocolError(
       'Mr Price Ireland',

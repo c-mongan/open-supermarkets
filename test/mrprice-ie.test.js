@@ -343,6 +343,20 @@ test('mrprice: reads exact attribute names rather than suffixes', async () => {
   assert.equal(product.retail_price.price,1.99);
 });
 
+
+test('mrprice: accepts spaced href without a data-href attribute', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href = "/products/item" title="Item">Item</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.product_uid,'https://www.mrprice.online/products/item');
+});
+
+test('mrprice: exact grid id ignores an earlier data-id lookalike', async () => {
+  const html='<div data-id="js-product-ajax"><div class="product-card" data-price="999"><a href="/products/wrong">Wrong</a></div></div><div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.name,'Item');
+  assert.equal(product.retail_price.price,1.99);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
