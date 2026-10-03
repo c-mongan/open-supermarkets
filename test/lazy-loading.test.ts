@@ -272,11 +272,13 @@ console.log('\nregistry/factory parity');
     );
   });
 
-  check('Aldi manifest retains its lazy legacy constructor and truthful capabilities', () => {
+  check('Aldi uses the async provider contract with truthful capabilities', async () => {
     const manifest = PROVIDERS.find((m: any) => m.id === 'aldi-ie');
     assert.ok(manifest);
     assert.deepStrictEqual(manifest.capabilities, ['search', 'stores']);
-    const provider = ProviderFactory.create('aldi-ie');
+    assert.throws(() => ProviderFactory.create('aldi-ie'), /no synchronous constructor/);
+    const { createProvider } = require('../src/providers');
+    const provider = await createProvider('aldi-ie');
     assert.equal(provider.name, 'aldi-ie');
     assert.equal(typeof provider.search, 'function');
     assert.equal(typeof provider.listStores, 'function');
