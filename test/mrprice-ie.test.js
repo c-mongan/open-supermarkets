@@ -8,7 +8,7 @@ const ROOT = path.resolve(__dirname, '..');
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const jsonFixture = (name) => JSON.parse(fixture(name));
 
-const { MrPriceIrelandProvider } = require('../dist/providers/mrprice-ie.js');
+const { MrPriceIrelandProvider } = require('../src/providers/mrprice-ie');
 function response(body, status = 200, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
   return {
@@ -57,7 +57,7 @@ async function rejects(fn, pattern) {
 test('mrprice: calls Shopify predictive search with a bounded product limit', async () => {
   const calls = [];
   const provider = new MrPriceIrelandProvider({
-    fetcher: queueFetch([jsonFixture('mrprice-predictive.json')], calls),
+    fetcher: queueFetch([jsonFixture('mrprice-predictive.json'),fixture('mrprice-search.html')], calls),
   });
   await provider.search('milk', { limit: 5 });
   const url = new URL(calls[0].url);
@@ -77,7 +77,7 @@ test('mrprice: maps decimal EUR prices, resolves image URLs, and maps stock', as
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([payload]),
   });
-  const products = await provider.search('milk');
+  const products = await provider.search('milk', {limit:3});
   assert.equal(products[0].retail_price.price, 1.79);
   assert.equal(products[0].image_url, 'https://cdn.example.test/milk.jpg');
   assert.deepEqual(products.map((product) => product.in_stock), [true, false, null]);
@@ -99,7 +99,7 @@ test('mrprice: preserves integer predictive prices in euros', async () => {
       },
     }]),
   });
-  const [product] = await provider.search('small');
+  const [product] = await provider.search('small', {limit:1});
   assert.equal(product.retail_price.price, 99);
 });
 
@@ -225,7 +225,7 @@ test('mrprice: does not hide a predictive endpoint server error', async () => {
 
 test('mrprice: preserves numeric IDs, title sizes and conflicting stock uncertainty', async () => {
   const provider = new MrPriceIrelandProvider({ fetcher: queueFetch([{resources: {results: {products: [{id: 9822467555664, title: 'Milk 110g', price: '3.99', url: '/products/milk?tracking=1', available: true, tags: ['Out of stock']}]}}}]) });
-  const [product] = await provider.search('milk');
+  const [product] = await provider.search('milk', {limit:1});
   assert.equal(product.product_uid, '9822467555664');
   assert.equal(product.size, '110g');
   assert.equal(product.in_stock, null);
@@ -254,7 +254,7 @@ test('mrprice: surfaces auth, rate-limit and fallback errors', async () => {
 test('mrprice: skips invalid records and rejects an all-invalid collection', async () => {
   const fixturePayload=jsonFixture('mrprice-predictive.json');
   fixturePayload.resources.results.products.push({title:'Invalid',url:'/products/invalid',price:'free123'});
-  const valid=await new MrPriceIrelandProvider({fetcher:queueFetch([fixturePayload])}).search('milk');
+  const valid=await new MrPriceIrelandProvider({fetcher:queueFetch([fixturePayload])}).search('milk',{limit:2});
   assert.equal(valid.length,2);
   const invalid={resources:{results:{products:[{title:'Invalid',url:'/products/invalid',price:'free123'}]}}};
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([invalid])}).search('milk'), /no valid products/);
@@ -287,13 +287,40 @@ test('mrprice: HTML uses named link after image link and preserves product ID', 
 });
 
 test('mrprice: manifest declares only community anonymous Ireland search', async () => {
-  const {getManifest,createProvider}=require('../dist/providers/registry');
+  const {getManifest,createProvider}=require('../src/providers/registry');
   const manifest=getManifest('mrprice-ie');
   assert.deepEqual(manifest.capabilities,['search']);
   assert.equal(manifest.country,'IE');
   assert.equal(manifest.auth,'none');
   assert.equal(manifest.tier,'community');
   assert.equal((await createProvider('mrprice-ie')).name,'mrprice-ie');
+});
+
+
+test('mrprice: short predictive windows use full-search fallback', async () => {
+  const calls=[];
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([jsonFixture('mrprice-predictive.json'),fixture('mrprice-search.html')],calls)});
+  assert.equal((await provider.search('milk',{limit:3}))[0].name,'Oat Milk 1L');
+  assert.equal(calls.length,2);
+});
+
+test('mrprice: incomplete HTML windows with later pages are rejected', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div><a href="/search?page=2&amp;q=milk">Next</a></div>';
+  for(const options of [{offset:24,limit:1},{offset:0,limit:3}]) {
+    await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',options), /further pages are unsupported/);
+  }
+});
+
+test('mrprice: matches exact class tokens and badge attributes in any order', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card other" data-price="199"><div class="product-card-price">Price</div><a href="/products/item" title="Item 1L">Item 1L</a><span data-id="1234" class="badge shopify-product-reviews-badge"></span></div></div>';
+  const products=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(products.length,1);
+  assert.equal(products[0].product_uid,'1234');
+});
+
+test('mrprice: rejects fractional HTML cents', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="1.99"><a href="/products/item">Item</a></div></div>';
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item'), /no valid products/);
 });
 
 async function main() {

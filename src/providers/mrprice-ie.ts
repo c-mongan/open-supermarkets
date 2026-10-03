@@ -13,6 +13,7 @@ import {
   type FetchLike,
   jsonResponse,
   ProviderHttpError,
+  ProviderInputError,
   ProviderProtocolError,
   requireRecordArray,
   requireQuery,
@@ -47,7 +48,7 @@ function shopifyMoney(value: unknown, cents = false): number | undefined {
   if (parsed === undefined || !Number.isFinite(parsed) || parsed < 0) return undefined;
 
   // Predictive search uses major currency units. HTML data-price uses cents.
-  return cents ? parsed / 100 : parsed;
+  return cents ? (Number.isInteger(parsed) ? parsed / 100 : undefined) : parsed;
 }
 
 function mapPredictiveProduct(
@@ -83,6 +84,10 @@ function extractAttribute(tag: string, attribute: string): string | undefined {
   return match?.[1];
 }
 
+function hasClass(tag: string, name: string): boolean {
+  return (extractAttribute(tag, 'class') ?? '').split(/\s+/).includes(name);
+}
+
 function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
   const anchors = [...card.matchAll(/<a\b[^>]*href=["'][^"']*\/products\/[^"']+["'][^>]*>/gi)];
   const anchorMatch = anchors.find(match => extractAttribute(match[0], 'title')) ?? anchors[0];
@@ -100,7 +105,7 @@ function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
   const name = (title ? htmlText(title) : '') || anchorText;
   if (!name) return undefined;
 
-  const openTag = card.match(/<[^>]+class=["'][^"']*product-card[^"']*["'][^>]*>/i)?.[0] ?? '';
+  const openTag = [...card.matchAll(/<[^>]+>/g)].find(match => hasClass(match[0], 'product-card'))?.[0] ?? '';
   const cents = extractAttribute(openTag, 'data-price');
   const price = shopifyMoney(cents, true);
   if (price === undefined) return undefined;
@@ -117,8 +122,11 @@ function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
     extractAttribute(openTag, 'class') ?? ''
   );
 
+  const badge = [...card.matchAll(/<[^>]+>/g)].find(match => hasClass(match[0], 'shopify-product-reviews-badge'))?.[0];
+  const productId = badge ? extractAttribute(badge, 'data-id') : undefined;
+
   return {
-    product_uid: card.match(/class=["']shopify-product-reviews-badge["'][^>]*data-id=["'](\d+)["']/i)?.[1] ?? url,
+    product_uid: productId && /^\d+$/.test(productId) ? productId : url,
     name,
     size: name.match(/\b\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|pack)(?:\b|$)/i)?.[0],
     retail_price: { price },
@@ -170,9 +178,9 @@ function parseHtmlProducts(
   offset: number
 ): Product[] {
   const grid = extractSearchGrid(html);
-  const starts = [...grid.matchAll(/<[^>]+class=["'][^"']*\bproduct-card\b[^"']*["'][^>]*>/gi)]
-    .map((match) => match.index)
-    .filter((index): index is number => index !== undefined);
+  const starts = [...grid.matchAll(/<[^>]+>/g)]
+    .filter(match => hasClass(match[0], 'product-card'))
+    .map(match => match.index!);
   const cards = starts.map((start, index) =>
     grid.slice(start, starts[index + 1] ?? grid.length)
   );
@@ -184,6 +192,10 @@ function parseHtmlProducts(
       'Mr Price Ireland',
       'HTML product-card collection contained no valid products'
     );
+  }
+  const hasNextPage = /href=["'][^"']*[?&]page=(?:[2-9]|[1-9]\d+)[^"']*["']/i.test(grid);
+  if (hasNextPage && offset + limit > products.length) {
+    throw new ProviderInputError('Mr Price Ireland', 'requested window exceeds the first HTML search page; further pages are unsupported');
   }
   return products.slice(offset, offset + limit);
 }
@@ -245,7 +257,7 @@ export class MrPriceIrelandProvider implements GroceryProvider {
       const payload = await jsonResponse<unknown>(suggestionResponse, 'Mr Price Ireland');
       const predictive = predictiveProducts(payload, this.baseUrl);
       const predictiveWindowFitsCap = offset <= 10 - limit;
-      if (offset < predictive.length && predictiveWindowFitsCap) {
+      if (predictive.length >= offset + limit && predictiveWindowFitsCap) {
         return predictive.slice(offset, offset + limit);
       }
     } else if (![404, 410].includes(suggestionResponse.status)) {
