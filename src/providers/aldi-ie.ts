@@ -244,6 +244,7 @@ export class AldiIrelandProvider implements GroceryProvider {
   private readonly searchUrls: readonly string[];
   private readonly servicePointsUrl: string;
   private storeId?: string;
+  private readonly validatedStoreIds = new Set<string>();
 
   constructor(options: AldiIrelandOptions = {}) {
     this.fetcher = options.fetcher ?? fetch;
@@ -263,9 +264,10 @@ export class AldiIrelandProvider implements GroceryProvider {
     }
     const limit = clampLimit(options.limit, 10, 60);
     const offset = clampOffset(options.offset);
-    const storeId = options.storeId === undefined
-      ? this.storeId
-      : await this.validatedStoreId(options.storeId);
+    const requestedStoreId = options.storeId ?? this.storeId;
+    const storeId = requestedStoreId === undefined
+      ? undefined
+      : await this.validatedStoreId(requestedStoreId);
     if (!storeId) {
       throw new ProviderInputError(
         'Aldi Ireland requires a store id. Pass --store-id or set SUPERMARKET_ALDI_IE_STORE_ID.'
@@ -362,9 +364,11 @@ export class AldiIrelandProvider implements GroceryProvider {
 
   private async validatedStoreId(storeId: string): Promise<string> {
     const selectedStoreId = normalizedStoreId(storeId);
+    if (this.validatedStoreIds.has(selectedStoreId)) return selectedStoreId;
     for (let offset = 0; offset < 500; offset += STORE_LOOKUP_MAX) {
       const stores = await this.listStores({ limit: STORE_LOOKUP_MAX, offset });
       if (stores.some((store) => store.store_id === selectedStoreId)) {
+        this.validatedStoreIds.add(selectedStoreId);
         return selectedStoreId;
       }
       if (stores.length < STORE_LOOKUP_MAX) break;
