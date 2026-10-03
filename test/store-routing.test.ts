@@ -79,6 +79,9 @@ async function helpers(): Promise<void> {
       { mode: 'drone' },
       { limit: '0' },
       { limit: '2.5' },
+      { limit: '2junk' },
+      { latitude: '53junk', longitude: '-6' },
+      { range: '2junk' },
       { query: '  ' },
       ...['storeId', 'latitude', 'longitude', 'limit', 'query', 'mode', 'postcode', 'range'].map((key) => ({ [key]: null })),
     ]) {
@@ -289,6 +292,19 @@ async function mcpRoutes(): Promise<void> {
       assert.deepEqual(byName.grocery_search.required, ['query']);
     });
 
+    await test('grocery_providers discovers registry providers without loading their code', async () => {
+      const before = FAKE_IDS.map(loadCount);
+      const r = await call('grocery_providers', {});
+      assert.equal(r.isError, false, r.text);
+      for (const manifest of PROVIDERS) {
+        assert.ok(r.text.includes(`- ${manifest.id}:`), manifest.id);
+      }
+      assert.match(r.text, /fake-stores: no login required; auth: none; capabilities: search, stores/);
+      assert.deepEqual(FAKE_IDS.map(loadCount), before);
+      assert.equal(events.selects.length, 0);
+      assert.equal(fakes.fetchCalls, 0);
+    });
+
     await test('grocery_stores maps arguments onto StoreSearchOptions', async () => {
       const r = await call('grocery_stores', { provider: 'fake-stores', query: 'dub', shopping_mode: 'pickup', limit: 2, latitude: 53.3, longitude: -6.2 });
       assert.equal(r.isError, false, r.text);
@@ -372,9 +388,17 @@ async function mcpRoutes(): Promise<void> {
         assert.match(r.text, /query must be a non-empty string/);
       }
       for (const queries of [null, [], ['milk', ' '], [null], [{ query: 5 }],
-        ...[-1, 0, 1.5, null, '3'].map((limit) => [{ query: 'milk', limit }])]) {
+        ...[-1, 0, 1.5, null, '3'].map((limit) => [{ query: 'milk', limit }]),
+        ...['storeId', 'store_id'].flatMap((key) => ['s2', null, ''].map((id) => [{ query: 'milk', [key]: id }]))]) {
         const r = await call('grocery_search_batch', { provider: 'fake-stores', store_id: 's1', queries });
         assert.equal(r.isError, true, r.text);
+      }
+      for (const [name, input] of [
+        ['grocery_search', { query: ' ' }],
+        ['grocery_search_batch', { queries: [null] }],
+      ] as const) {
+        const r = await call(name, { provider: 'fake-search', store_id: 's1', ...input });
+        assert.match(r.text, /query must be a non-empty string/);
       }
       assert.equal(loadCount('fake-stores'), before);
       assert.equal(events.selects.length, 0);
@@ -495,6 +519,14 @@ async function cliRoutes(): Promise<void> {
     }
   });
 
+  await test('Ocado slot booking fails before its provider loads', () => {
+    const r = runCli(['--provider', 'ocado', 'book', '1']);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /does not support slot booking/);
+    assert.equal(r.routing.loads.ocado, 0);
+    assert.equal(r.routing.fetchCalls, 0);
+  });
+
   await test('CLI capability guards preserve supported legacy basket reads', () => {
     const r = runCli(['--provider', 'sainsburys', 'basket', '--json'], undefined, { TEST_FAKE_LEGACY: '1' });
     assert.equal(r.status, 0, r.stderr);
@@ -509,6 +541,10 @@ async function cliRoutes(): Promise<void> {
       [['search', '--batch', '-'], '[null]'],
       [['search', '--batch', '-'], '[{"query":5}]'],
       [['search', '--batch', '-'], '{bad-json}'],
+      ...['2.5', '2junk', '0', '-1'].map((limit) => [['search', 'milk', '--limit', limit], undefined]),
+      ...['storeId', 'store_id'].flatMap((key) => ['s2', null, ''].map((id) => [
+        ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', [key]: id }]),
+      ])),
       ...[-1, 0, 1.5, null, '3'].map((limit) => [
         ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', limit }]),
       ]),
@@ -518,6 +554,29 @@ async function cliRoutes(): Promise<void> {
       assert.equal(r.routing.fakeLoads['fake-stores'], 0);
       assert.equal(r.routing.selects.length, 0);
       assert.equal(r.routing.searches.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
+  });
+
+  await test('CLI store numeric inputs reject partial and fractional integer values before loading', () => {
+    for (const args of [
+      ['--limit', '2junk'], ['--limit', '2.5'],
+      ['--latitude', '53junk', '--longitude', '-6'], ['--range', '2junk'],
+    ]) {
+      const r = runCli(['--provider', 'fake-stores', 'stores', ...args]);
+      assert.equal(r.status, 1, r.stderr);
+      assert.equal(r.routing.fakeLoads['fake-stores'], 0);
+      assert.equal(r.routing.listStores.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
+  });
+
+  await test('CLI invalid query takes precedence over unsupported store capability', () => {
+    for (const [args, input] of [[['search', ' '], undefined], [['search', '--batch', '-'], '[null]']] as Array<[string[], string | undefined]>) {
+      const r = runCli(['--provider', 'fake-search', '--store-id', 's1', ...args], input);
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /query must be a non-empty string/);
+      assert.equal(r.routing.fakeLoads['fake-search'], 0);
       assert.equal(r.routing.fetchCalls, 0);
     }
   });
@@ -533,7 +592,7 @@ async function cliRoutes(): Promise<void> {
       const r = runCli([...args], '["milk"]');
       assert.equal(r.status, 1, `${args.join(' ')}\n${r.stderr}`);
       assert.match(r.stderr, pattern);
-      assert.deepEqual(r.routing.loads, { 'lidl-ie': 0, ahorramas: 0, mercadona: 0 });
+      assert.deepEqual(r.routing.loads, Object.fromEntries(GUARDED_REAL_IDS.map((id) => [id, 0])));
       assert.equal(r.routing.fetchCalls, 0);
       assert.equal(r.routing.searches.length, 0);
     }
