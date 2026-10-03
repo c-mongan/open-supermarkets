@@ -3,8 +3,16 @@
 import http from 'node:http';
 import { URL } from 'node:url';
 import { ProviderFactory, ProviderName } from './providers';
-import { createProvider } from './providers/registry';
+import { assertCapability, createProvider } from './providers/registry';
 import type { FullGroceryProvider, SearchOptions } from './providers/types';
+import {
+  assertStoresSupported,
+  clientErrorStatus,
+  listProviderStores,
+  parseStoreSearchOptions,
+  prepareStoreId,
+  selectStoreForSearch,
+} from './stores';
 
 type FavouritesProvider = FullGroceryProvider & {
   getFavourites?: (options?: SearchOptions) => Promise<unknown[]>;
@@ -29,14 +37,26 @@ function parsePositiveInt(value: string | null, name: string, defaultValue: numb
   if (value === null || value === '') return defaultValue;
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
-    throw new Error(`${name} must be a positive integer, got "${value}"`);
+    throw Object.assign(new Error(`${name} must be a positive integer, got "${value}"`), { statusCode: 400 });
   }
   return parsed;
 }
 
+function providerIdFor(url: URL): string {
+  return url.searchParams.get('provider') || defaultProvider;
+}
+
 function getProvider(url: URL): FullGroceryProvider {
-  const providerName = (url.searchParams.get('provider') || defaultProvider) as ProviderName;
-  return ProviderFactory.create(providerName);
+  return ProviderFactory.create(providerIdFor(url) as ProviderName);
+}
+
+/** Basket routes need the `basket` capability; checked before any provider code runs. */
+const BASKET_PATHS = new Set(['/add', '/remove', '/update', '/basket']);
+
+/** Optional query parameter: absent stays undefined, present-but-empty is passed on for validation. */
+function optionalParam(url: URL, name: string): string | undefined {
+  const value = url.searchParams.get(name);
+  return value === null ? undefined : value;
 }
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
@@ -59,7 +79,7 @@ function checkAuth(req: http.IncomingMessage): boolean {
   return req.headers.authorization === `Bearer ${apiToken}`;
 }
 
-async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+export async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   if (!checkAuth(req)) {
     return sendJson(res, 401, { error: 'Unauthorized' });
   }
@@ -75,7 +95,8 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
       ok: true,
       provider: url.searchParams.get('provider') || defaultProvider,
       endpoints: [
-        '/search?q=',
+        '/search?q=&store_id=',
+        '/stores?query=&postcode=&latitude=&longitude=&range=&mode=&limit=',
         '/add?id=&qty=',
         '/remove?id=',
         '/update?id=&qty=',
@@ -89,9 +110,42 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   if (url.pathname === '/search') {
     const q = requireQuery(url, 'q');
     const limit = parsePositiveInt(url.searchParams.get('limit'), 'limit', 24);
-    const provider = await createProvider(url.searchParams.get('provider') || defaultProvider);
-    const products = await provider.search(q, { limit });
-    return sendJson(res, 200, { products });
+    const providerId = providerIdFor(url);
+    // Invalid id → 400, provider without `stores` → 501, both before any request.
+    const storeId = prepareStoreId(providerId, optionalParam(url, 'store_id'));
+    // A fresh provider per request, so a selected store never outlives it.
+    const provider = await createProvider(providerId);
+    if (!storeId) {
+      return sendJson(res, 200, { products: await provider.search(q, { limit }) });
+    }
+    await selectStoreForSearch(providerId, provider, storeId);
+    const products = await provider.search(q, { limit, storeId });
+    return sendJson(res, 200, { store_id: storeId, products });
+  }
+
+  if (url.pathname === '/stores') {
+    const providerId = providerIdFor(url);
+    const options = parseStoreSearchOptions(
+      {
+        query: optionalParam(url, 'query'),
+        postcode: optionalParam(url, 'postcode'),
+        latitude: optionalParam(url, 'latitude'),
+        longitude: optionalParam(url, 'longitude'),
+        range: optionalParam(url, 'range'),
+        mode: optionalParam(url, 'mode'),
+        limit: optionalParam(url, 'limit'),
+        storeId: optionalParam(url, 'store_id'),
+      },
+      20
+    );
+    assertStoresSupported(providerId);
+    const provider = await createProvider(providerId);
+    const stores = await listProviderStores(providerId, provider, options);
+    return sendJson(res, 200, { provider: providerId, stores });
+  }
+
+  if (BASKET_PATHS.has(url.pathname)) {
+    assertCapability(providerIdFor(url), 'basket');
   }
 
   const provider = getProvider(url);
@@ -147,20 +201,28 @@ async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse
   return sendJson(res, 404, { error: 'Not found' });
 }
 
-const server = http.createServer((req, res) => {
-  handleRequest(req, res).catch((error: any) => {
-    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    sendJson(res, status, { error: error?.message || 'Internal server error' });
+export function createHttpServer(): http.Server {
+  return http.createServer((req, res) => {
+    handleRequest(req, res).catch((error: any) => {
+      // Bad input is 400 and an unsupported operation is 501, not a server fault.
+      const status =
+        clientErrorStatus(error) ??
+        (Number.isInteger(error?.statusCode) ? error.statusCode : 500);
+      sendJson(res, status, { error: error?.message || 'Internal server error' });
+    });
   });
-});
+}
 
-server.listen(port, host, () => {
-  console.log(`open-supermarkets API listening on http://${host}:${port}`);
-  console.log(`Provider: ${defaultProvider}`);
-  if (!apiToken) {
-    console.log('No SUPERMARKET_API_TOKEN set; relying on localhost binding for access control.');
-  }
-  if (host !== '127.0.0.1' && host !== 'localhost' && !apiToken) {
-    console.warn('WARNING: API is not bound to localhost and has no token. Set SUPERMARKET_API_TOKEN.');
-  }
-});
+if (require.main === module) {
+  const server = createHttpServer();
+  server.listen(port, host, () => {
+    console.log(`open-supermarkets API listening on http://${host}:${port}`);
+    console.log(`Provider: ${defaultProvider}`);
+    if (!apiToken) {
+      console.log('No SUPERMARKET_API_TOKEN set; relying on localhost binding for access control.');
+    }
+    if (host !== '127.0.0.1' && host !== 'localhost' && !apiToken) {
+      console.warn('WARNING: API is not bound to localhost and has no token. Set SUPERMARKET_API_TOKEN.');
+    }
+  });
+}

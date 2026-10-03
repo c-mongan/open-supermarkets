@@ -16,17 +16,12 @@ import {
   firstString,
   type FetchLike,
   jsonResponse,
+  ProviderInputError,
   ProviderProtocolError,
   requireRecordArray,
   requireQuery,
 } from './ie/shared';
 
-class ProviderInputError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ProviderInputError';
-  }
-}
 function env(name: string): string | undefined {
   return firstString(process.env[name]);
 }

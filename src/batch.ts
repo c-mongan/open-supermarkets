@@ -60,8 +60,14 @@ export function lean(p: Product): LeanProduct {
   };
 }
 
-function normalise(q: BatchQuery): { query: string; limit?: number } {
-  return typeof q === 'string' ? { query: q } : q;
+function normalise(q: BatchQuery): { query: string; limit?: number; perItemStore: boolean } {
+  if (typeof q === 'string') return { query: q, perItemStore: false };
+  const raw = q as Record<string, unknown>;
+  return {
+    query: q.query,
+    limit: q.limit,
+    perItemStore: raw.storeId !== undefined || raw.store_id !== undefined,
+  };
 }
 
 /**
@@ -72,6 +78,12 @@ function normalise(q: BatchQuery): { query: string; limit?: number } {
  * 403 and conclude the integration is broken. A failed query yields an `error`
  * on that entry rather than sinking the batch, since one bad ingredient should
  * not cost you the other twenty-nine.
+ *
+ * Store scope is batch-wide: the caller selects one store on this provider
+ * instance before calling, and `options.storeId` is copied into a fresh options
+ * object per query. A per-query store would mean re-selecting mutable provider
+ * state mid-batch while other queries are in flight, so it is rejected for that
+ * item instead of silently pricing it at the wrong store.
  */
 export async function batchSearch(
   provider: GroceryProvider,
@@ -86,7 +98,15 @@ export async function batchSearch(
   async function worker(): Promise<void> {
     while (cursor < items.length) {
       const i = cursor++;
-      const { query, limit } = items[i];
+      const { query, limit, perItemStore } = items[i];
+      if (perItemStore) {
+        out[i] = {
+          query,
+          products: [],
+          error: 'Per-query store ids are not supported; pass one store id for the whole batch.',
+        };
+        continue;
+      }
       try {
         const products = await provider.search(query, {
           ...options,

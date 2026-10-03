@@ -127,8 +127,33 @@ interface SearchOptions {
   limit?: number;           // Max results (default: 24)
   offset?: number;          // Pagination offset
   category?: string;        // Filter by category
+  storeId?: string;         // Retailer store id (providers with `stores` only)
 }
 ```
+
+### Store-scoped search
+
+Some retailers price and stock per store. Those providers declare the `stores`
+capability and implement two methods that remain optional in `FullGroceryProvider`:
+
+```typescript
+listStores?(options?: StoreSearchOptions): Promise<Store[]>;
+selectStore?(storeId: string): Promise<void>;
+```
+
+Every route selects the store on a fresh provider instance, then searches with the
+same `storeId`. A batch selects once before its queries run, and the store applies to
+the whole batch. Per-query store ids are rejected for that item.
+
+| Surface | Store lookup | Store-scoped search |
+|---------|--------------|---------------------|
+| CLI | `supermarket -p <id> stores [--query --postcode --latitude --longitude --range --mode --limit]` | `supermarket -p <id> --store-id <store> search milk` (also `--batch`) |
+| HTTP | `GET /stores?provider=<id>&query=&postcode=&latitude=&longitude=&range=&mode=&limit=` | `GET /search?provider=<id>&q=milk&store_id=<store>` |
+| MCP | `grocery_stores` | `store_id` on `grocery_search` / `grocery_search_batch` |
+
+Input is validated, and the capability is checked from the manifest, before any
+provider code loads or any request is made. Over HTTP, invalid input returns `400`
+and an unsupported operation returns `501`.
 
 ---
 
