@@ -820,6 +820,12 @@ test('tesco: numeric HTTP errors and arbitrary suffixes never permit fallback', 
   }
 });
 
+test('tesco: adding Ireland search preserves Lidl as the country default', () => {
+  const {providersFor,list}=require('../dist/providers/registry');
+  assert.deepEqual(list({country:'IE'}).map(provider=>provider.id),['lidl-ie','tesco-ie']);
+  assert.equal(providersFor('IE','search')[0].id,'lidl-ie');
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

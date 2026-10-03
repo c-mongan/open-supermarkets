@@ -57,17 +57,6 @@ export const PROVIDERS: ProviderManifest[] = [
 
   // ── Ireland ──────────────────────────────────────────────────────────
   {
-    id: 'tesco-ie',
-    label: 'Tesco Ireland',
-    country: 'IE',
-    capabilities: ['search'],
-    auth: 'anonymous',
-    tier: 'community',
-    maintainer: 'c-mongan',
-    credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
-    load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
-  },
-  {
     id: 'lidl-ie',
     label: 'Lidl Ireland',
     country: 'IE',
@@ -77,6 +66,17 @@ export const PROVIDERS: ProviderManifest[] = [
     maintainer: 'c-mongan',
     credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
     load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
+  },
+  {
+    id: 'tesco-ie',
+    label: 'Tesco Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'anonymous',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
+    load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
   },
 
   // ── Netherlands ──────────────────────────────────────────────────────
