@@ -53,7 +53,9 @@ malformed responses, HTTP errors, prices, pack sizes, and unknown stock.
 ## Limits
 
 Basket, login, delivery slots, checkout, orders, product lookup, and product
-category filters are unsupported. A category redirect, such as the live `milk`
+category filters are unsupported. Country comparison does not select a store, so
+Dunnes returns an explicit store-scope error while other providers retain their
+results. Dunnes comparison needs future store-scoped comparison support. A category redirect, such as the live `milk`
 query, is an actionable error. Use a more specific query. Missing stock remains
 `null`. Missing size remains absent. Invalid product identity or price rows are
 not returned; an entirely invalid non-empty collection is an error.
