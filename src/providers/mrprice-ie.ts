@@ -304,10 +304,10 @@ export class MrPriceIrelandProvider implements GroceryProvider {
       headers: { Accept: 'text/html,application/xhtml+xml' },
       signal: AbortSignal.timeout(20_000),
     });
-    const html = await responseText(response);
     if (!response.ok) {
       throw new ProviderHttpError('Mr Price Ireland', response.status);
     }
+    const html = await responseText(response);
     return parseHtmlProducts(html, this.baseUrl, limit, offset, normalizedQuery);
   }
 }

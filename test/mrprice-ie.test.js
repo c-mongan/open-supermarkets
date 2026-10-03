@@ -371,6 +371,14 @@ test('mrprice: rejects product links outside configured storefront', async () =>
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1}), /no valid products/);
 });
 
+
+test('mrprice: preserves failed HTML status without reading broken body', async () => {
+  let bodyRead=false;
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([{resources:{results:{products:[]}}},()=>({ok:false,status:429,async text(){bodyRead=true;throw new Error('broken body')}})])});
+  await assert.rejects(() => provider.search('milk'), error => error.name==='ProviderHttpError' && error.status===429);
+  assert.equal(bodyRead,false);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
