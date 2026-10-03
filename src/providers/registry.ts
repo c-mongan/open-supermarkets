@@ -57,6 +57,17 @@ export const PROVIDERS: ProviderManifest[] = [
 
   // ── Ireland ──────────────────────────────────────────────────────────
   {
+    id: 'dunnes-ie',
+    label: 'Dunnes Stores Ireland',
+    country: 'IE',
+    capabilities: ['search', 'stores'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Grocery gateway protocol independently verified against the Ireland storefront',
+    load: async () => (await import('./dunnes-ie')).DunnesIrelandProvider,
+  },
+  {
     id: 'lidl-ie',
     label: 'Lidl Ireland',
     country: 'IE',
