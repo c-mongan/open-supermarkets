@@ -83,14 +83,12 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   const regionsPrices = asRecord(data.regionsPrices);
   const regionPrice = asRecord(regionsPrices['1']);
   const currentPrice = asRecord(regionPrice.currentPrice);
-  const currentLidlPlusPrice = asRecord(regionPrice.currentLidlPlusPrice);
-  const currentLidlPlusPriceDetails = asRecord(currentLidlPlusPrice.price);
   // Offer terms can appear only on the regional price while data.price
   // repeats the discounted amount. A multibuy is not a single-item price.
   const conditional = conditionalPrice(price) || conditionalPrice(currentPrice);
   const productPrice = conditional
     ? firstPrice(regularOldPrice(currentPrice), regularOldPrice(price))
-    : firstPrice(price.price, currentPrice.price, regularOldPrice(currentLidlPlusPriceDetails));
+    : firstPrice(price.price, currentPrice.price);
   const canonicalPath = firstString(data.canonicalUrl, data.url);
   const id = firstString(data.id, data.productId, data.code, canonicalPath);
   if (!id || productPrice === undefined) return undefined;
