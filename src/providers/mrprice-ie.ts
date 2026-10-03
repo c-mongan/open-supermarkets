@@ -25,14 +25,13 @@ function htmlText(value: string): string {
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (entity, value: string) => {
-      const point = value.toLowerCase().startsWith('x') ? parseInt(value.slice(1), 16) : Number(value);
+    .replace(/&(amp|quot|apos|nbsp|#x[0-9a-f]+|#[0-9]+);/gi, (entity, value: string) => {
+      const named: Record<string, string> = { amp: '&', quot: '"', apos: "'", nbsp: ' ' };
+      const token = value.toLowerCase();
+      if (named[token] !== undefined) return named[token];
+      const point = token.startsWith('#x') ? parseInt(token.slice(2), 16) : Number(token.slice(1));
       return point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
     })
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
     .replace(/\s+/g, ' ')
     .trim();
 }

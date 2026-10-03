@@ -422,9 +422,9 @@ test('mrprice: ignores hidden no-results markup', async () => {
 });
 
 test('mrprice: decodes numeric character references in product names', async () => {
-  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Caf&#xE9; Baker&#8217;s 1L &amp;#8217;</a></div></div>';
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Caf&#xE9; Baker&#8217;s 1L &amp;#8217; &#38;quot;</a></div></div>';
   const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
-  assert.equal(product.name,"Café Baker’s 1L &#8217;");
+  assert.equal(product.name,"Café Baker’s 1L &#8217; &quot;");
   assert.equal(product.size,'1L');
 });
 
