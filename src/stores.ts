@@ -62,7 +62,7 @@ export function validateBatchSearchQueries(value: unknown): void {
       throw invalid('Use one store id for the whole batch; per-query store ids are unsupported');
     }
     if (item !== null && typeof item === 'object' && item.limit !== undefined &&
-        (typeof item.limit !== 'number' || !Number.isInteger(item.limit) || item.limit <= 0)) {
+        (typeof item.limit !== 'number' || !Number.isSafeInteger(item.limit) || item.limit <= 0)) {
       throw invalid('query limit must be a positive integer');
     }
   }
@@ -134,7 +134,8 @@ export async function listProviderStores(
   options: StoreSearchOptions
 ): Promise<Store[]> {
   assertStoresSupported(providerId);
-  return requireStoreMethod(providerId, provider, 'listStores').listStores(options);
+  const stores = await requireStoreMethod(providerId, provider, 'listStores').listStores(options);
+  return stores.slice(0, Math.min(options.limit ?? 100, 100));
 }
 
 /** Raw store lookup input, as strings (CLI/HTTP) or numbers (MCP). */
