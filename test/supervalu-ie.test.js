@@ -363,7 +363,7 @@ test('supervalu: uses the explicit non-member price and unit price for rewards d
   const provider = new SuperValuIrelandProvider({
     storeId: '5550',
     fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
-      productId: '1014325007', name: 'Nescafé Gold Blend Coffee (190 g)',
+      productId: '1014325007', name: 'Nescafé Gold Blend Coffee (190 g)', description: 'Instant coffee',
       priceNumeric: 8.75, price: '€8.75', wholePrice: 12.59,
       pricePerUnit: '€46.05/kg', hasLoyaltyDiscount: true,
       subtotalWithoutLoyalty: '€12.59', unitPriceWithoutLoyalty: '€66.26/kg',
@@ -373,6 +373,7 @@ test('supervalu: uses the explicit non-member price and unit price for rewards d
   const [product] = await provider.search('coffee');
   assert.equal(product.retail_price.price, 12.59);
   assert.deepEqual(product.unit_price, { price: 66.26, measure: 'kg' });
+  assert.equal(product.description, 'Instant coffee');
 });
 
 test('supervalu: does not guess a missing non-member rewards price', async () => {
@@ -386,7 +387,20 @@ test('supervalu: does not guess a missing non-member rewards price', async () =>
   await rejects(() => provider.search('coffee'), /valid products/);
 });
 
-test('supervalu: maps price, unit price, promotion text, image, and size', async () => {
+test('supervalu: rejects malformed loyalty flags instead of using a member price', async () => {
+  for (const hasLoyaltyDiscount of ['true', 1, null]) {
+    const provider = new SuperValuIrelandProvider({
+      storeId: '5550',
+      fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
+        productId: 'rewards', name: 'Rewards Coffee', priceNumeric: 8.75,
+        subtotalWithoutLoyalty: '€12.59', hasLoyaltyDiscount,
+      }] }]),
+    });
+    await rejects(() => provider.search('coffee'), /valid products/);
+  }
+});
+
+test('supervalu: maps price, unit price, image, and size without a conditional offer label', async () => {
   const payload = jsonFixture('supervalu-gateway.json');
   payload.items.push(
     { id: 'SV-6002', name: 'Unavailable Milk', priceNumeric: 1.99, available: false },
@@ -407,7 +421,7 @@ test('supervalu: maps price, unit price, promotion text, image, and size', async
   const [product] = products;
   assert.equal(product.retail_price.price, 2.55);
   assert.deepEqual(product.unit_price, { price: 1.28, measure: '1 L' });
-  assert.equal(product.description, '2 for €4.50');
+  assert.equal(product.description, undefined);
   assert.equal(product.size, '2 L');
   assert.equal(product.image_url, 'https://img.example.test/sv-milk.jpg');
   assert.deepEqual(products.map((item) => item.in_stock), [true, false, null, null]);

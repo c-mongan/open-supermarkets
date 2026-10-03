@@ -16,7 +16,6 @@ import {
   asRecord,
   asString,
   asNumber,
-  asRecords,
   clampLimit,
   clampOffset,
   explicitBooleanState,
@@ -82,6 +81,7 @@ function productPrice(...values: unknown[]): number | undefined {
 function mapProduct(item: Record<string, unknown>): Product | undefined {
   const name = firstString(item.name, item.title, item.productName);
   const id = firstString(item.id, item.productId, item.sku);
+  if (item.hasLoyaltyDiscount !== undefined && typeof item.hasLoyaltyDiscount !== 'boolean') return undefined;
   const hasLoyaltyDiscount = item.hasLoyaltyDiscount === true;
   const price = hasLoyaltyDiscount ? productPrice(item.subtotalWithoutLoyalty) : productPrice(
     item.priceNumeric,
@@ -90,8 +90,6 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     asRecord(item.price).value
   );
   if (!id || !name || price === undefined || price < 0) return undefined;
-  const promotions = asRecords(item.promotions);
-  const promotion = promotions[0];
 
   return {
     product_uid: id,
@@ -111,10 +109,7 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     provider: 'supervalu-ie',
     currency: 'EUR',
     size: firstString(item.size, item.packSize) ?? productSize(item.unitOfSize),
-    // Promotion details are intentionally not forced into Product because the
-    // current upstream interface has no promotion field.
-    description:
-      firstString(item.description) ?? firstString(promotion?.description),
+    description: firstString(item.description),
   };
 }
 
