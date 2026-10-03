@@ -8,6 +8,7 @@ import {
   countries as knownCountries,
   providersFor,
   createProvider,
+  assertCapability,
 } from './providers/registry';
 import type { Capability } from './providers/types';
 import { money } from './format';
@@ -1002,6 +1003,20 @@ program.hook('preAction', (_program, command) => {
       !['search', 'stores'].includes(command.name())) {
     console.error(`--store-id is only supported by search and stores, not ${command.name()}.`);
     process.exit(1);
+  }
+  const capabilityByCommand: Record<string, Capability> = {
+    basket: 'basket', add: 'basket', remove: 'basket', update: 'basket', clear: 'basket',
+    slots: 'slots', book: 'slots', checkout: 'checkout', orders: 'orders',
+  };
+  const capability = capabilityByCommand[command.name()];
+  if (capability) {
+    const provider = command.optsWithGlobals().provider;
+    try {
+      assertCapability(provider, capability);
+    } catch (error) {
+      console.error(explain(error, { provider, action: command.name() }));
+      process.exit(1);
+    }
   }
 });
 

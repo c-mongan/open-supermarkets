@@ -385,13 +385,13 @@ async function mcpRoutes(): Promise<void> {
   }
 }
 
-function runCli(args: string[], input?: string) {
+function runCli(args: string[], input?: string, extraEnv: Record<string, string> = {}) {
   const tsxCli = require.resolve('tsx/cli');
   const helper = path.join(__dirname, 'fixtures', 'store-routing-cli.ts');
   const r = spawnSync(process.execPath, [tsxCli, helper, ...args], {
     input,
     encoding: 'utf8',
-    env: { ...process.env, NO_COLOR: '1' },
+    env: { ...process.env, ...extraEnv, NO_COLOR: '1' },
     timeout: 60_000,
   });
   const marker = r.stderr.lastIndexOf('__ROUTING__ ');
@@ -449,6 +449,28 @@ async function cliRoutes(): Promise<void> {
       assert.equal(r.routing.selects.length, 0);
       assert.equal(r.routing.fetchCalls, 0);
     }
+  });
+
+  await test('CLI capability guards refuse unsupported account operations before provider loading', () => {
+    for (const args of [
+      ['basket'], ['add', '1'], ['add', '--batch', '-'], ['remove', '1'], ['update', '1', '2'],
+      ['clear'], ['slots'], ['book', '1'], ['checkout', '--confirm'], ['orders'],
+    ]) {
+      const r = runCli(['--provider', 'fake-search', ...args], '[{"id":"1"}]');
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /does not support/);
+      assert.doesNotMatch(r.stderr, /constructor|not a function/);
+      assert.equal(r.routing.fakeLoads['fake-search'], 0);
+      assert.equal(r.routing.searches.length, 0);
+      assert.equal(r.routing.fetchCalls, 0);
+    }
+  });
+
+  await test('CLI capability guards preserve supported legacy basket reads', () => {
+    const r = runCli(['--provider', 'sainsburys', 'basket', '--json'], undefined, { TEST_FAKE_LEGACY: '1' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { items: [], total_quantity: 0, total_cost: 0, provider: 'sainsburys' });
+    assert.equal(r.routing.fetchCalls, 0);
   });
 
   await test('unsupported or invalid store routes fail before provider code or network', () => {
