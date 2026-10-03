@@ -199,12 +199,12 @@ function storeLookupOptions(options: StoreSearchOptions): {
     throw new ProviderInputError('Aldi Ireland', 'Aldi store lookup does not support a range filter');
   }
   if (options.shoppingMode !== undefined) {
-    throw new ProviderInputError('Aldi Ireland', 
+    throw new ProviderInputError('Aldi Ireland',
       'Aldi Ireland exposes walk-in service points only; pickup and delivery filters are unsupported'
     );
   }
   if (options.retailerStoreId !== undefined) {
-    throw new ProviderInputError('Aldi Ireland', 
+    throw new ProviderInputError('Aldi Ireland',
       'Aldi store lookup does not support retailerStoreId filtering; use selectStore for validated selection'
     );
   }
@@ -269,7 +269,7 @@ export class AldiIrelandProvider implements GroceryProvider {
       ? undefined
       : await this.validatedStoreId(requestedStoreId);
     if (!storeId) {
-      throw new ProviderInputError('Aldi Ireland', 
+      throw new ProviderInputError('Aldi Ireland',
         'Aldi Ireland requires a store id. Pass --store-id or set SUPERMARKET_ALDI_IE_STORE_ID.'
       );
     }
