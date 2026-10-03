@@ -202,7 +202,8 @@ function storeMatches(store: Store, fullTextSearch?: string, postcode?: string):
     const haystack = normalizedSearchText(
       [store.name, store.address, store.postcode].filter(Boolean).join(' ')
     );
-    if (!haystack.includes(query)) return false;
+    const compactPostcode = normalizedSearchText(store.postcode ?? '').replace(/ /g, '');
+    if (!haystack.includes(query) && !compactPostcode.includes(query.replace(/ /g, ''))) return false;
   }
   if (postcode) {
     const expected = normalizedSearchText(postcode).replace(/ /g, '');

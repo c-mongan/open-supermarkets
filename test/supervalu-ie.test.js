@@ -494,6 +494,11 @@ test('supervalu: implicit selection also validates known metadata', async () => 
   await rejects(() => provider.search('milk'), /unsupported currency/);
 });
 
+test('supervalu: full text store search accepts compact Eircodes', async () => {
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([jsonFixture('supervalu-stores.json')])});
+  assert.deepEqual((await provider.listStores({fullTextSearch:'T12N799'})).map(store => store.store_id), ['5550']);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);
