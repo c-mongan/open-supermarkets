@@ -996,4 +996,13 @@ program
     }
   });
 
+// Refuse a store scope that the selected command cannot honor before its action runs.
+program.hook('preAction', (_program, command) => {
+  if (command.optsWithGlobals().storeId !== undefined &&
+      !['search', 'stores'].includes(command.name())) {
+    console.error(`--store-id is only supported by search and stores, not ${command.name()}.`);
+    process.exit(1);
+  }
+});
+
 program.parse();

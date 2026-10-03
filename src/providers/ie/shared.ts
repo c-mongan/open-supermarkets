@@ -1,4 +1,3 @@
-import type { Product } from '../types';
 export { ProviderInputError } from '../../provider-errors';
 
 export type FetchLike = (
@@ -216,23 +215,4 @@ export function absoluteUrl(base: string, candidate: unknown): string | undefine
   } catch {
     return undefined;
   }
-}
-
-
-
-export function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
-  const text = asString(value);
-  if (!text) return undefined;
-  const match = text.match(/^\s*€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*(.+)$/i);
-  if (!match) return undefined;
-  const price = asNumber(match[1]);
-  const measure = match[2]?.trim();
-  return price !== undefined && measure ? { price, measure } : undefined;
-}
-
-
-export function env(name: string): string | undefined {
-  const processLike = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  const value = processLike.process?.env?.[name];
-  return asString(value);
 }

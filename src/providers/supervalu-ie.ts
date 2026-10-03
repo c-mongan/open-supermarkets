@@ -14,21 +14,38 @@ import type {
 import {
   absoluteUrl,
   asRecord,
+  asString,
+  asNumber,
   asRecords,
   clampLimit,
   clampOffset,
-  env,
   explicitBooleanState,
   firstNumber,
   firstString,
   type FetchLike,
   jsonResponse,
-  parseUnitPrice,
   ProviderInputError,
   ProviderProtocolError,
   requireRecordArray,
   requireQuery,
 } from './ie/shared';
+
+function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  const match = text.match(/^\s*€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*(.+)$/i);
+  if (!match) return undefined;
+  const price = asNumber(match[1]);
+  const measure = match[2]?.trim();
+  return price !== undefined && measure ? { price, measure } : undefined;
+}
+
+
+function env(name: string): string | undefined {
+  const processLike = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  const value = processLike.process?.env?.[name];
+  return asString(value);
+}
 
 const BASE_URL = 'https://shop.supervalu.ie';
 const GATEWAY_BASE = 'https://storefrontgateway.supervalu.ie/api';
@@ -299,7 +316,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const offset = clampOffset(options.offset);
     const selectedStoreId = normalizedStoreId(this.storeId);
     if (this.verifiedStoreId !== selectedStoreId) {
-      await this.listStores({ retailerStoreId: selectedStoreId, limit: 1 });
+      await this.validateSelectedStore(selectedStoreId);
       if (this.storeId === selectedStoreId) this.verifiedStoreId = selectedStoreId;
     }
     const url = new URL(
@@ -500,9 +517,20 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     return filtered.slice(offset, offset + selection.limit);
   }
 
+  private async validateSelectedStore(storeId: string): Promise<void> {
+    const stores = await this.listStores({ retailerStoreId: storeId, limit: 1 });
+    const store = stores.find(candidate => candidate.store_id === storeId)!;
+    if (store.currency !== undefined && store.currency !== 'EUR') {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} uses unsupported currency ${store.currency}`);
+    }
+    if (store.status !== undefined && store.status !== 'active') {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} is not active (${store.status})`);
+    }
+  }
+
   async selectStore(storeId: string): Promise<void> {
     const selectedStoreId = normalizedStoreId(storeId);
-    await this.listStores({ retailerStoreId: selectedStoreId, limit: 1 });
+    await this.validateSelectedStore(selectedStoreId);
     this.storeId = selectedStoreId;
     this.verifiedStoreId = selectedStoreId;
   }

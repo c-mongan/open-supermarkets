@@ -81,7 +81,7 @@ export function requireStoreMethod<K extends StoreMethod>(
  * Returns the normalised id, or undefined when no store was requested.
  */
 export function prepareStoreId(providerId: string, raw: unknown): string | undefined {
-  if (raw === undefined || raw === null) return undefined;
+  if (raw === undefined) return undefined;
   const storeId = normaliseStoreId(raw);
   assertStoresSupported(providerId);
   return storeId;
@@ -123,7 +123,7 @@ export interface RawStoreSearchInput {
 }
 
 function present(value: unknown): boolean {
-  return value !== undefined && value !== null;
+  return value !== undefined;
 }
 
 function optionalText(value: unknown, name: string): string | undefined {
@@ -173,7 +173,7 @@ export function parseStoreSearchOptions(
     throw invalid(`limit must be a positive integer, got "${String(input.limit)}"`);
   }
 
-  const options: StoreSearchOptions = { limit };
+  const options: StoreSearchOptions = { limit: Math.min(limit, 100) };
   const query = optionalText(input.query, 'query');
   const postcode = optionalText(input.postcode, 'postcode');
   if (query !== undefined) options.fullTextSearch = query;

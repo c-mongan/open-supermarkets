@@ -478,6 +478,22 @@ test('supervalu: combined pagination and nearby filters can return an empty stor
   }
 });
 
+test('supervalu: selection rejects known currency or inactive metadata, preserving unknown metadata', async () => {
+  for (const metadata of [{currency:'GBP'}, {status:'Inactive'}]) {
+    const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'Store A',...metadata}]}])});
+    await rejects(() => provider.selectStore('A'), /unsupported currency|not active/);
+    await rejects(() => provider.search('milk'), /requires a store id/);
+  }
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'Store A'}]},jsonFixture('supervalu-gateway.json')])});
+  await provider.selectStore('A');
+  assert.equal((await provider.search('milk'))[0].currency, 'EUR');
+});
+
+test('supervalu: implicit selection also validates known metadata', async () => {
+  const provider = new SuperValuIrelandProvider({storeId:'A',fetcher:queueFetch([{items:[{retailerStoreId:'A',name:'Store A',currency:'USD'}]}])});
+  await rejects(() => provider.search('milk'), /unsupported currency/);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);

@@ -433,16 +433,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     // Search-only providers cannot use the legacy authenticated operations.
     // Reject before constructing a provider or making a retailer request.
     const catalogueTool = name === 'grocery_search' || name === 'grocery_search_batch';
+    if (catalogueTool) prepareStoreId(providerName, (args as any).store_id);
     const storeTool = name === 'grocery_stores';
+    const storeOptions = storeTool ? parseStoreSearchOptions({
+      query: (args as any).query,
+      postcode: (args as any).postcode,
+      latitude: (args as any).latitude,
+      longitude: (args as any).longitude,
+      range: (args as any).range,
+      mode: (args as any).shopping_mode,
+      limit: (args as any).limit,
+    }) : undefined;
     if (storeTool) assertStoresSupported(providerName);
+    const providerSpecificTool = name === 'ocado_regulars' || name === 'tesco_staples';
     const globalTool = name === 'grocery_status' || name === 'grocery_providers' || name === 'grocery_compare';
-    if (!catalogueTool && !storeTool && !globalTool &&
+    if (!catalogueTool && !storeTool && !globalTool && !providerSpecificTool &&
         getManifest(providerName).capabilities.every(capability => capability === 'search' || capability === 'stores')) {
       return textResult(`Provider "${providerName}" does not support ${name}. Catalogue search only.`, true);
     }
-    if (!globalTool && name !== 'grocery_login' &&
+    if (!globalTool && !providerSpecificTool && name !== 'grocery_login' &&
         ((!catalogueTool && !storeTool) || !searchesAnonymously(providerName))) {
-      const loginError = requireLogin(providerName);
+      // Registry integrations handle their configured credentials in their own
+      // methods. Only legacy integrations use these four session files.
+      const loginError = (catalogueTool || storeTool) && SESSION_PATHS[providerName] === undefined
+        ? null : requireLogin(providerName);
       if (loginError) return textResult(loginError, true);
     }
 
@@ -489,19 +503,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'grocery_stores') {
-      const a = args as Record<string, unknown>;
-      const options = parseStoreSearchOptions({
-        query: a.query,
-        postcode: a.postcode,
-        latitude: a.latitude,
-        longitude: a.longitude,
-        range: a.range,
-        mode: a.shopping_mode,
-        limit: a.limit,
-      });
-      assertStoresSupported(providerName);
       const provider = await createProvider(providerName);
-      const stores = await listProviderStores(providerName, provider, options);
+      const stores = await listProviderStores(providerName, provider, storeOptions!);
       return textResult(JSON.stringify({ provider: providerName, stores }, null, 2));
     }
 
@@ -540,7 +543,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = catalogueTool && searchesAnonymously(providerName) ? null : requireLogin(providerName);
+    const loginError = catalogueTool &&
+      (searchesAnonymously(providerName) || SESSION_PATHS[providerName] === undefined)
+      ? null : requireLogin(providerName);
 
     // ── grocery_search ──
     if (name === 'grocery_search') {
@@ -660,6 +665,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── ocado_regulars ──
     if (name === 'ocado_regulars') {
+      const ocadoLoginError = requireLogin('ocado');
+      if (ocadoLoginError) return textResult(ocadoLoginError, true);
       const provider: any = getProvider('ocado');
 
       if (typeof provider.getRegulars !== 'function') {
