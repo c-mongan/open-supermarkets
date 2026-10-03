@@ -34,10 +34,10 @@ function parsePort(value: string): number {
   return parsed;
 }
 
-function parsePositiveInt(value: string | null, name: string, defaultValue: number): number {
-  if (value === null || value === '') return defaultValue;
+function parsePositiveInt(value: string | null, name: string, defaultValue: number, decimalOnly = false): number {
+  if (value === null || (!decimalOnly && value === '')) return defaultValue;
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1) {
+  if ((decimalOnly && !/^\d+$/.test(value)) || !Number.isSafeInteger(parsed) || parsed < 1) {
     throw Object.assign(new Error(`${name} must be a positive integer, got "${value}"`), { statusCode: 400 });
   }
   return parsed;
@@ -110,7 +110,7 @@ export async function handleRequest(req: http.IncomingMessage, res: http.ServerR
 
   if (url.pathname === '/search') {
     const q = requireSearchQuery(requireQuery(url, 'q'));
-    const limit = parsePositiveInt(url.searchParams.get('limit'), 'limit', 24);
+    const limit = parsePositiveInt(url.searchParams.get('limit'), 'limit', 24, true);
     const providerId = providerIdFor(url);
     // Invalid id → 400, provider without `stores` → 501, both before any request.
     const storeId = prepareStoreId(providerId, optionalParam(url, 'store_id'));
