@@ -273,7 +273,7 @@ test('tesco: partial GraphQL errors fail loudly rather than return incomplete re
   const mixed = jsonFixture('tesco-hydration.json');
   mixed[0] = { errors: [{ message: 'regional product unavailable' }] };
   const provider = new TescoIrelandProvider({ strategy: 'index', fetcher: queueFetch([jsonFixture('tesco-index-search.json'), mixed]) });
-  await rejects(() => provider.search('milk'), /regional product unavailable/);
+  await rejects(() => provider.search('milk'), /GraphQL upstream request failed/);
 });
 
 test('tesco: all failed hydration records fail loudly rather than appearing empty', async () => {
@@ -287,7 +287,7 @@ test('tesco: all failed hydration records fail loudly rather than appearing empt
       ],
     ]),
   });
-  await rejects(() => provider.search('milk'), /unauthorized/);
+  await rejects(() => provider.search('milk'), /authentication/);
 });
 
 test('tesco: structurally empty hydration records fail loudly', async () => {
@@ -489,7 +489,7 @@ test('tesco: malformed successful xapi results do not trigger fallback', async (
 test('tesco: non-projection GraphQL errors do not trigger fallback', async () => {
   const calls = [];
   const provider = new TescoIrelandProvider({fetcher:queueFetch([{errors:[{message:'Unauthenticated'}]}],calls)});
-  await rejects(()=>provider.search('milk'), /Unauthenticated/);
+  await rejects(()=>provider.search('milk'), /authentication/);
   assert.equal(calls.length, 1);
 });
 
@@ -528,7 +528,7 @@ test('tesco: index hydration must preserve requested TPNBs', async () => {
 test('tesco: partial GraphQL errors cannot hide behind valid lookup data', async () => {
   const node = jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;
   const provider=new TescoIrelandProvider({fetcher:queueFetch([[{data:{product:node},errors:[{message:'price resolver failed'}]}]])});
-  await rejects(()=>provider.getProduct(node.tpnb), /price resolver failed/);
+  await rejects(()=>provider.getProduct(node.tpnb), /GraphQL upstream request failed/);
 });
 
 test('tesco: HTTP upstream failures stop without another transport', async () => {
@@ -549,7 +549,7 @@ test('tesco: display-only prices are not assumed to be regular prices', async ()
 test('tesco: generic validation errors do not allow projection fallback', async () => {
   const calls=[];
   const provider=new TescoIrelandProvider({fetcher:queueFetch([{errors:[{message:'Validation error: unauthenticated'}]}],calls)});
-  await rejects(()=>provider.search('milk'), /unauthenticated/);
+  await rejects(()=>provider.search('milk'), /authentication/);
   assert.equal(calls.length,1);
 });
 
@@ -561,7 +561,7 @@ test('tesco: mixed projection and authentication errors cannot allow fallback', 
   ]) {
     const calls=[];
     const provider=new TescoIrelandProvider({fetcher:queueFetch([envelopes],calls)});
-    await rejects(()=>provider.search('milk',{limit:2,offset:envelopes.length===2?1:0}), /Unauthenticated|Rate limited|no results array/);
+    await rejects(()=>provider.search('milk',{limit:2,offset:envelopes.length===2?1:0}), /authentication|rate limited|no results array/);
     assert.equal(calls.length,1);
   }
 });
@@ -593,7 +593,7 @@ test('tesco: shared product-schema failures do not trigger index fallback', asyn
   for(const message of ['Cannot query field "sellers" on type "ProductType".', 'Cannot query field "details" on type "ProductType".', 'Unknown argument "tpnb" on field "Query.product".']) {
     const calls=[];
     const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message}]}]],calls)});
-    await rejects(()=>provider.search('milk'), /Cannot query field|Unknown argument/);
+    await rejects(()=>provider.search('milk'), /GraphQL upstream request failed/);
     assert.equal(calls.length,1);
   }
 });
@@ -626,7 +626,7 @@ test('tesco: malformed GraphQL errors cannot be ignored beside valid data', asyn
     const batch=jsonFixture('tesco-xapi-search.json');batch[0].errors=errors;
     const calls=[];
     const provider=new TescoIrelandProvider({fetcher:queueFetch([batch],calls)});
-    await rejects(()=>provider.search('milk'), /malformed GraphQL|unknown GraphQL/);
+    await rejects(()=>provider.search('milk'), /GraphQL upstream request failed/);
     assert.equal(calls.length,1);
   }
 });
@@ -655,7 +655,7 @@ test('tesco: invalid supplied primary identity/name fields cannot fall back', as
 test('tesco: nested search field schema errors do not permit fallback', async () => {
   const calls=[];
   const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "ProductType".'}]}]],calls)});
-  await rejects(()=>provider.search('milk'), /ProductType/);assert.equal(calls.length,1);
+  await rejects(()=>provider.search('milk'), /GraphQL upstream request failed/);assert.equal(calls.length,1);
 });
 
 test('tesco: a root Search argument error permits one bounded fallback', async () => {
@@ -686,7 +686,7 @@ test('tesco: auth/rate-limit/unknown GraphQL metadata stops projection-shaped er
   for(const extensions of ['UNAUTHENTICATED','FORBIDDEN','RATE_LIMITED','THROTTLED','HTTP_TOO_MANY_REQUESTS','UNKNOWN'].map(code=>({code})).concat([{http:{status:429}},{status:401}])) {
     const calls=[];
     const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query".',extensions}]}]],calls)});
-    await rejects(()=>provider.search('milk'), /Cannot query field/);assert.equal(calls.length,1);
+    await rejects(()=>provider.search('milk'), /GraphQL.*(?:failed|rejected|rate limited)/);assert.equal(calls.length,1);
   }
 });
 
@@ -699,7 +699,7 @@ test('tesco: explicit GraphQL validation code permits safe root projection fallb
 test('tesco: authentication text cannot hide in a root projection-shaped message', async () => {
   const calls=[];
   const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message:'Cannot query field "search" on type "Query". Unauthorized'}]}]],calls)});
-  await rejects(()=>provider.search('milk'), /Unauthorized/);assert.equal(calls.length,1);
+  await rejects(()=>provider.search('milk'), /authentication/);assert.equal(calls.length,1);
 });
 
 test('tesco: valid primary identity/name fields do not hide malformed alternates', async () => {
@@ -723,6 +723,20 @@ test('tesco: unit price and measure stay paired within one source', async () => 
   node.unitPrice={price:0.5};
   const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
   const [product]=await provider.search('milk');assert.deepEqual(product.unit_price,{price:1.18,measure:'litre'});
+});
+
+test('tesco: invalid JSON and GraphQL diagnostics never echo upstream canaries', async () => {
+  const canary='unstructured-private-address-and-token-canary';
+  for(const strategy of ['xapi','index']) {
+    const provider=new TescoIrelandProvider({strategy,fetcher:queueFetch([`<html>${canary}</html>`])});
+    await assert.rejects(()=>provider.search('milk'),error=>{assert.match(error.message,/expected JSON/);assert.ok(!error.message.includes(canary));return true;});
+  }
+  for(const message of [`retailer resolver failed ${canary}`,`Cannot query field "search" on type "ProductType". ${canary}`,`Unauthenticated ${canary}`]) {
+    const calls=[];
+    const provider=new TescoIrelandProvider({fetcher:queueFetch([[{errors:[{message}]}]],calls)});
+    await assert.rejects(()=>provider.search('milk'),error=>{assert.match(error.message,/GraphQL/);assert.ok(!error.message.includes(canary));return true;});
+    assert.equal(calls.length,1);
+  }
 });
 
 async function main() {

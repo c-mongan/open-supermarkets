@@ -22,7 +22,6 @@ import {
   asRecords,
   clampLimit,
   clampOffset,
-  compactSnippet,
   explicitBooleanState,
   firstString,
   type FetchLike,
@@ -284,7 +283,23 @@ function graphQlMessages(value: unknown): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) return ['malformed GraphQL errors collection'];
   return value.map(error =>
-    compactSnippet(firstString(asRecord(error).message) ?? 'unknown GraphQL error'));
+    firstString(asRecord(error).message) ?? 'unknown GraphQL error');
+}
+
+function graphQlFailureMessage(envelopes: GraphQLEnvelope[], messages: string[]): string {
+  const metadata = envelopes.flatMap(envelope => Array.isArray(envelope.errors) ? envelope.errors : [])
+    .map(error => {
+      const extensions = asRecord(asRecord(error).extensions);
+      return [extensions.code, extensions.status, asRecord(extensions.http).status].join(' ');
+    }).join(' ');
+  const classification = [...messages, metadata].join(' ');
+  if (/unauth|authenticat|authorization|forbidden|invalid.?client|\b401\b|\b403\b/i.test(classification)) {
+    return 'GraphQL authentication or access rejected; anonymous catalogue access is unavailable. Check the current public web API key before retrying.';
+  }
+  if (/rate.?limit|throttl|too many requests|\b429\b/i.test(classification)) {
+    return 'GraphQL request rate limited. Stop and retry later.';
+  }
+  return 'GraphQL upstream request failed. Check the current retailer API schema and access before retrying.';
 }
 
 function isProjectionFailure(messages: readonly string[], envelopes: GraphQLEnvelope[]): boolean {
@@ -442,9 +457,9 @@ export class TescoIrelandProvider implements GroceryProvider {
         }
       }
       if (isProjectionFailure(messages, envelopes)) {
-        throw new TescoSearchProjectionError(messages.slice(0, 3).join('; '));
+        throw new TescoSearchProjectionError('root Search projection is unavailable');
       }
-      throw new ProviderProtocolError('Tesco Ireland', messages.slice(0, 3).join('; '));
+      throw new ProviderProtocolError('Tesco Ireland', graphQlFailureMessage(envelopes, messages));
     }
     const results: unknown[] = [];
     for (const envelope of envelopes) {
@@ -513,7 +528,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     } catch {
       throw new ProviderProtocolError(
         'Tesco Ireland search index',
-        `expected JSON but received ${compactSnippet(text) || 'an empty body'}`
+        'expected JSON; the retailer returned an invalid response or challenge page'
       );
     }
 
@@ -554,7 +569,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     for (const [index, envelope] of envelopes.entries()) {
       const messages = graphQlMessages(envelope.errors);
       if (messages.length > 0) {
-        errors.push(...messages);
+        errors.push('GraphQL product hydration failed');
         continue;
       }
       const data = asRecord(envelope.data);
@@ -649,7 +664,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     } catch {
       throw new ProviderProtocolError(
         'Tesco Ireland',
-        `expected JSON but received ${compactSnippet(text) || 'an empty body'}`
+        'expected JSON; the retailer returned an invalid response or challenge page'
       );
     }
     const envelopes = (Array.isArray(decoded) ? decoded : [decoded]).map((value) => {
@@ -666,7 +681,7 @@ export class TescoIrelandProvider implements GroceryProvider {
     if (!options.allowProjectionErrors) {
       const messages = envelopes.flatMap((envelope) => graphQlMessages(envelope.errors));
       if (messages.length > 0) {
-        throw new ProviderProtocolError('Tesco Ireland', messages.slice(0, 3).join('; '));
+        throw new ProviderProtocolError('Tesco Ireland', graphQlFailureMessage(envelopes, messages));
       }
     }
     return envelopes;
