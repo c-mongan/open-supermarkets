@@ -31,6 +31,20 @@ async function main() {
     assert.ok(!error.message.includes(canary));
     return true;
   });
+  for (const name of ['TimeoutError', 'TypeError']) {
+    const transportError = new Error('response stream failed');
+    transportError.name = name;
+    const brokenBody = { ok: true, status: 200, text: async () => { throw transportError; } } as Response;
+    await assert.rejects(jsonResponse(brokenBody, 'lidl-ie'), error => error === transportError);
+  }
+  // Error status does not require reading or exposing the retailer body.
+  const unreadableError = { ok: false, status: 429, text: async () => { throw new Error('private body'); } } as Response;
+  await assert.rejects(jsonResponse(unreadableError, 'lidl-ie'), error => {
+    assert.ok(error instanceof ProviderHttpError);
+    assert.equal(error.status, 429);
+    assert.ok(!error.message.includes('private body'));
+    return true;
+  });
   assert.deepEqual(await jsonResponse(new Response('{"items":[]}'), 'lidl-ie'), { items: [] });
   console.log('  ✓ strict amounts and safe retailer-response errors');
 }
