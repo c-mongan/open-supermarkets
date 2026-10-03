@@ -25,6 +25,11 @@ async function main() {
       assert.match(body, /does not support/, path);
       assert.doesNotMatch(body, /constructor|Unexpected legacy/, path);
     }
+    for (const path of ['/favourites', '/fav-search?q=milk']) {
+      const response = await fetch(`${base}${path}${path.includes('?') ? '&' : '?'}provider=instacart`);
+      assert.equal(response.status, 501, path);
+      assert.match(await response.text(), /does not support/);
+    }
     const unknown = await fetch(`${base}/unknown?provider=lidl-ie`);
     assert.equal(unknown.status, 404);
     assert.equal(constructions, 0, 'unsupported routes must not construct providers');

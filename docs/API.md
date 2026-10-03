@@ -145,6 +145,8 @@ Every route selects the store on a fresh provider instance, then searches with t
 same `storeId`. A batch selects once before its queries run, and the store applies to
 the whole batch. Per-query store ids are rejected for that item. Store lookup limits
 are capped at 100. CLI commands other than `search` and `stores` reject `--store-id`.
+Missing, non-string, or blank queries fail before store selection. Each batch entry
+must contain a valid query; upstream failures for valid entries remain isolated.
 
 | Surface | Store lookup | Store-scoped search |
 |---------|--------------|---------------------|

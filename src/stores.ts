@@ -41,6 +41,25 @@ function invalid(message: string): StoreRoutingError {
   return new StoreRoutingError('invalid_input', message);
 }
 
+/** Validate caller search input without changing valid query text. */
+export function requireSearchQuery(value: unknown): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw invalid('query must be a non-empty string');
+  }
+  return value;
+}
+
+/** All batch inputs must be valid before selecting a store or creating a provider. */
+export function validateBatchSearchQueries(value: unknown): void {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw invalid('queries must be a non-empty array');
+  }
+  for (const item of value) {
+    const query = typeof item === 'string' ? item : item !== null && typeof item === 'object' ? item.query : undefined;
+    requireSearchQuery(query);
+  }
+}
+
 /** Trimmed, non-empty store id, or an invalid-input error. */
 export function normaliseStoreId(value: unknown, label = 'store_id'): string {
   if (typeof value !== 'string' || value.trim() === '') {
