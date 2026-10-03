@@ -228,10 +228,16 @@ test('Lidl passes a deadline signal and identifies upstream timeouts', async () 
   assert.ok(signal instanceof AbortSignal);
 });
 
-test('Lidl identifies timeouts during response-body reading', async () => {
+test('Lidl identifies timeouts during response-body reading', async (t) => {
+  const controller = new AbortController();
+  t.mock.method(AbortSignal, 'timeout', (milliseconds) => {
+    assert.equal(milliseconds, 15000);
+    return controller.signal;
+  });
   const fetcher = async () => ({ ok: true, status: 200, async text() {
     const error = new Error('body stalled');
     error.name = 'TimeoutError';
+    controller.abort(error);
     throw error;
   } });
   await assert.rejects(() => new LidlIrelandProvider({ fetcher }).search('milk'), /Lidl Ireland request timed out/);
