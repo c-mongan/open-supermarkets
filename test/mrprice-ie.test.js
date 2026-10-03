@@ -414,6 +414,20 @@ test('mrprice: does not mistake an arbitrary no-results phrase for retailer stat
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},'<div id="js-product-ajax">No results found</div>'])}).search('milk'), /no recognized products or genuine no-results message/);
 });
 
+test('mrprice: ignores hidden no-results markup', async () => {
+  const marker='<div class="collection-nomatch-text">No results found</div>';
+  for(const html of [`<script type="text/template">${marker}</script>`,`<template>${marker}</template>`,`<!--${marker}-->`]) {
+    await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk'), /did not contain the search results grid/);
+  }
+});
+
+test('mrprice: decodes numeric character references in product names', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Caf&#xE9; Baker&#8217;s 1L</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.name,"Café Baker’s 1L");
+  assert.equal(product.size,'1L');
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

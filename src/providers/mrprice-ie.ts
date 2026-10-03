@@ -29,6 +29,10 @@ function htmlText(value: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&nbsp;/gi, ' ')
+    .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (entity, value: string) => {
+      const point = value.toLowerCase().startsWith('x') ? parseInt(value.slice(1), 16) : Number(value);
+      return point <= 0x10ffff && !(point >= 0xd800 && point <= 0xdfff) ? String.fromCodePoint(point) : entity;
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -200,6 +204,9 @@ function parseHtmlProducts(
   offset: number,
   query: string
 ): Product[] {
+  // Templates, scripts and comments do not prove a displayed search state.
+  html = html.replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ');
   let grid: string;
   try {
     grid = extractSearchGrid(html);
