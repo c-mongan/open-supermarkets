@@ -231,6 +231,21 @@ test('dunnes: rejects missing pagination totals during filtered discovery', asyn
   assert.equal(calls.length, 1);
 });
 
+test('dunnes: nearby discovery defaults to delivery but permits explicit pickup without selection', async () => {
+  const calls=[];
+  const pickupStore={items:[{retailerStoreId:'339',name:'Pickup-only store',currency:'EUR',shoppingModes:['Pickup']}]};
+  const provider=new DunnesIrelandProvider({fetcher:queueFetch([jsonFixture('dunnes-stores.json'),pickupStore],calls)});
+  const location={latitude:53.2777612,longitude:-6.2160268,limit:3};
+  await provider.listStores(location);
+  assert.equal(new URL(calls[0].url).searchParams.get('shoppingModeId'),'22222222-2222-2222-2222-222222222222');
+  await assert.rejects(()=>provider.search('bread'),/store-scoped/);
+  const pickup=await provider.listStores({...location,shoppingMode:'pickup'});
+  assert.equal(new URL(calls[1].url).searchParams.get('shoppingModeId'),'11111111-1111-1111-1111-111111111111');
+  assert.deepEqual(pickup[0].shopping_modes,['pickup']);
+  await assert.rejects(()=>provider.search('bread'),/store-scoped/);
+  assert.equal(calls.length,2);
+});
+
 test('dunnes: uses the nearby store endpoint and delivery mode id', async () => {
   const calls = [];
   const provider = new DunnesIrelandProvider({

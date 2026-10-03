@@ -62,7 +62,9 @@ not returned; an entirely invalid non-empty collection is an error.
 
 Store text and postcode filters run locally after bounded pagination (maximum
 10 pages of 100 stores). Nearby lookup uses the retailer endpoint and accepts
-coordinates, range, and pickup/delivery mode. It cannot be combined with text,
+coordinates, range, and pickup/delivery mode. Nearby lookup defaults to delivery
+so returned stores can support this catalogue. Explicit pickup mode remains
+available for discovery. Lookup does not select a store. It cannot be combined with text,
 postcode, or offset filters. All HTTP requests have a 20-second deadline, including response body parsing.
 Invalid returned coordinates remain absent.
 

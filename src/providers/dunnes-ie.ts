@@ -252,7 +252,7 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
     latitude: options.latitude,
     longitude: options.longitude,
     range,
-    shoppingMode: options.shoppingMode ?? 'pickup',
+    shoppingMode: options.shoppingMode ?? 'delivery',
   };
 }
 
