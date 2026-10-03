@@ -122,7 +122,7 @@ function fake(id: string, capabilities: ProviderManifest['capabilities'], ctor: 
 export const FAKE_IDS = ['fake-stores', 'fake-search', 'fake-stores-broken'];
 
 /** Real providers whose code must not load when a store route is refused. */
-export const GUARDED_REAL_IDS = ['lidl-ie', 'ahorramas', 'mercadona'];
+export const GUARDED_REAL_IDS = ['lidl-ie', 'ahorramas', 'mercadona', 'ocado'];
 
 export let fetchCalls = 0;
 

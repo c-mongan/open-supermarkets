@@ -143,15 +143,15 @@ selectStore?(storeId: string): Promise<void>;
 
 Every route selects the store on a fresh provider instance, then searches with the
 same `storeId`. A batch selects once before its queries run, and the store applies to
-the whole batch. Per-query store ids are rejected for that item. Store lookup limits
+the whole batch. Per-query store ids are rejected before provider work. Store lookup limits
 are capped at 100. CLI commands other than `search` and `stores` reject `--store-id`.
 Missing, non-string, or blank queries fail before store selection. Each batch entry
-must contain a valid query; upstream failures for valid entries remain isolated.
+must contain a valid query and an optional positive integer limit; upstream failures for valid entries remain isolated.
 
 | Surface | Store lookup | Store-scoped search |
 |---------|--------------|---------------------|
 | CLI | `supermarket -p <id> stores [--query --postcode --latitude --longitude --range --mode --limit]` | `supermarket -p <id> --store-id <store> search milk` (also `--batch`) |
-| HTTP | `GET /stores?provider=<id>&query=&postcode=&latitude=&longitude=&range=&mode=&limit=` | `GET /search?provider=<id>&q=milk&store_id=<store>` |
+| HTTP | `GET /stores?provider=<id>&query=&postcode=&latitude=&longitude=&range=&mode=&limit=&store_id=` | `GET /search?provider=<id>&q=milk&store_id=<store>` |
 | MCP | `grocery_stores` | `store_id` on `grocery_search` / `grocery_search_batch` |
 
 Input is validated, and the capability is checked from the manifest, before any

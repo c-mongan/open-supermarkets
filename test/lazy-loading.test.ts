@@ -246,7 +246,7 @@ console.log('\nerror translation');
 //
 // Existing providers must retain their legacy synchronous constructor.
 // New search-only providers use createProvider() through CLI, HTTP, and MCP
-// search routes. Lidl must not be cast to a full basket/checkout provider.
+// search routes. They must not be cast to full basket/checkout providers.
 // ─────────────────────────────────────────────────────────────────────
 console.log('\nregistry/factory parity');
 
@@ -255,14 +255,18 @@ console.log('\nregistry/factory parity');
 
   check('existing manifest entries retain synchronous constructors', () => {
     const broken: string[] = [];
-    for (const m of PROVIDERS) {
-      if (m.id === 'lidl-ie') continue; // search-only via async search routes
+    const legacyIds = [
+      'sainsburys', 'ocado', 'tesco', 'ah', 'ah-be', 'mercadona', 'ahorramas',
+      'tesco-hu', 'kroger', 'instacart', 'instacart-web',
+    ];
+    for (const id of legacyIds) {
+      assert.ok(PROVIDERS.some((m: any) => m.id === id), `${id} manifest is missing`);
       try {
-        ProviderFactory.create(m.id);
+        ProviderFactory.create(id);
       } catch (err: any) {
         // Missing credentials are fine — that is the provider working correctly.
         // "cannot be created" / "no synchronous constructor" is the drift we care about.
-        if (/synchronous/i.test(err.message)) broken.push(m.id);
+        if (/synchronous/i.test(err.message)) broken.push(id);
       }
     }
     assert.deepStrictEqual(
