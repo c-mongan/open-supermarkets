@@ -39,6 +39,7 @@ const SERVICE_POINTS = 'https://asl.api.aldi.ie/commerce/v2/service-points';
 const ALLOWED_PAGE_SIZES = [12, 16, 24, 30, 32, 48, 60] as const;
 const STORE_LOOKUP_LIMIT = 20;
 const STORE_LOOKUP_MAX = 100;
+const STORE_LOOKUP_MAX_PAGES = 100;
 
 export interface AldiIrelandOptions {
   fetcher?: FetchLike;
@@ -365,15 +366,23 @@ export class AldiIrelandProvider implements GroceryProvider {
   private async validatedStoreId(storeId: string): Promise<string> {
     const selectedStoreId = normalizedStoreId(storeId);
     if (this.validatedStoreIds.has(selectedStoreId)) return selectedStoreId;
-    for (let offset = 0; offset < 500; offset += STORE_LOOKUP_MAX) {
+    const seen = new Set<string>();
+    for (let page = 0; page < STORE_LOOKUP_MAX_PAGES; page++) {
+      const offset = page * STORE_LOOKUP_MAX;
       const stores = await this.listStores({ limit: STORE_LOOKUP_MAX, offset });
       if (stores.some((store) => store.store_id === selectedStoreId)) {
         this.validatedStoreIds.add(selectedStoreId);
         return selectedStoreId;
       }
-      if (stores.length < STORE_LOOKUP_MAX) break;
+      if (stores.some((store) => seen.has(store.store_id))) {
+        throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned overlapping identifiers');
+      }
+      for (const store of stores) seen.add(store.store_id);
+      if (stores.length < STORE_LOOKUP_MAX) {
+        throw new ProviderInputError('Aldi Ireland', `service point ${selectedStoreId} was not found`);
+      }
     }
-    throw new ProviderInputError('Aldi Ireland', `Aldi Ireland service point ${selectedStoreId} was not found`);
+    throw new ProviderProtocolError('Aldi Ireland stores', 'store validation exceeded the 100-page safety limit');
   }
 
 }

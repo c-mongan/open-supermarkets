@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
 const jsonFixture = (name) => JSON.parse(fixture(name));
-const { AldiIrelandProvider } = require('../dist/providers/aldi-ie.js');
+const { AldiIrelandProvider } = require('../src/providers/aldi-ie.ts');
 
 function response(body, status = 200, headers = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -375,6 +375,28 @@ test('aldi: malformed display amounts and fractional minor units are rejected', 
     const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'invalid',name:'Milk',price}]}])});
     await rejects(()=>p.search('milk'),/no valid products/);
   }
+});
+
+test('aldi: validates stores beyond the first 500 results', async () => {
+  const pages=Array.from({length:5},(_,page)=>({data:Array.from({length:100},(_,i)=>({id:`P${page}-${i}`,name:'Store'}))}));
+  pages.push({data:[{id:'D600',name:'Later store'}]});
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch(pages,calls)});
+  await p.selectStore('D600');
+  assert.equal(calls.length,6);assert.equal(new URL(calls[5].url).searchParams.get('offset'),'500');
+});
+
+test('aldi: repeated store pages report a protocol failure', async () => {
+  const page={data:Array.from({length:100},(_,i)=>({id:`P${i}`,name:'Store'}))};
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([page,page],calls)});
+  await rejects(()=>p.selectStore('D999'),/pagination returned overlapping identifiers/);
+  assert.equal(calls.length,2);
+});
+
+test('aldi: exhausted store validation is not reported as missing store', async () => {
+  const pages=Array.from({length:100},(_,page)=>({data:Array.from({length:100},(_,i)=>({id:`P${page}-${i}`,name:'Store'}))}));
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch(pages,calls)});
+  await rejects(()=>p.selectStore('D999'),/exceeded the 100-page safety limit/);
+  assert.equal(calls.length,100);
 });
 
 async function main() {
