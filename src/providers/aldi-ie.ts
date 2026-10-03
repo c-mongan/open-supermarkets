@@ -20,7 +20,6 @@ import {
   asRecords,
   clampLimit,
   clampOffset,
-  explicitBooleanState,
   firstNumber,
   firstString,
   type FetchLike,
@@ -129,12 +128,9 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     description: firstString(item.description),
     retail_price: { price: amount },
     unit_price: parseUnitPrice(comparison),
-    // Catalogue publication, opening hours, and a store's sellability do not
-    // prove stock. Only an explicit product-level availability field may do so.
-    in_stock: explicitBooleanState(
-      item.available,
-      typeof item.outOfStock === 'boolean' ? !item.outOfStock : undefined
-    ),
+    // Catalogue availability does not prove inventory at the selected store.
+    // Only a stock-specific boolean can make a known stock assertion.
+    in_stock: typeof item.outOfStock === 'boolean' ? !item.outOfStock : null,
     image_url: imageUrl(item),
     provider: 'aldi-ie',
     currency: 'EUR',

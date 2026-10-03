@@ -1,6 +1,6 @@
 # Aldi Ireland
 
-Anonymous, read-only catalogue search and walk-in store discovery. Select a store explicitly. Results are store-scoped catalogue prices; missing product stock remains `null`.
+Anonymous, read-only catalogue search and walk-in store discovery. Select a store explicitly. Results are store-scoped catalogue prices. Catalogue `available` flags do not prove inventory; stock remains `null` unless an explicit `outOfStock` boolean is present.
 
 ```bash
 open-supermarkets stores --provider aldi-ie --query Dublin --limit 2

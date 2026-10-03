@@ -143,11 +143,13 @@ test('aldi: reports unknown availability when product stock is absent', async ()
   assert.equal(products[1].in_stock, null);
 });
 
-test('aldi: maps only explicit product availability fields to stock', async () => {
+test('aldi: maps stock-specific signals and ignores catalogue availability', async () => {
   const provider = new AldiIrelandProvider({
     storeId: 'D001',
     fetcher: searchFetch([{ data: [
       { sku: 'available', name: 'Available Milk', price: { amountRelevant: 199 }, available: true },
+      { sku: 'unpublished', name: 'Unpublished Milk', price: { amountRelevant: 199 }, available: false },
+      { sku: 'stocked', name: 'Stocked Milk', price: { amountRelevant: 199 }, outOfStock: false },
       { sku: 'unavailable', name: 'Unavailable Milk', price: { amountRelevant: 199 }, outOfStock: true },
       {
         sku: 'conflicting',
@@ -159,7 +161,7 @@ test('aldi: maps only explicit product availability fields to stock', async () =
     ] }]),
   });
   const products = await provider.search('milk');
-  assert.deepEqual(products.map((product) => product.in_stock), [true, false, null]);
+  assert.deepEqual(products.map((product) => product.in_stock), [null, null, true, false, false]);
 });
 
 test('aldi: refuses to search without an explicit store selection', async () => {
