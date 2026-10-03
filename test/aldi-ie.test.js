@@ -411,6 +411,14 @@ test('aldi: malformed mapped store rows do not truncate remote pagination', asyn
   await p.selectStore('D600');assert.equal(new URL(calls[1].url).searchParams.get('offset'),'100');
 });
 
+test('aldi: malformed selected store records are protocol failures', async () => {
+  for (const identity of [{id:'D600'},{servicePoint:'D600'},{servicePoint:{id:'D600'}}]) {
+    const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Valid store'},identity]}],calls)});
+    await rejects(()=>p.search('milk',{storeId:'D600'}),/D600 had an invalid store record/);
+    assert.equal(calls.length,1);assert.match(calls[0].url,/service-points/);
+  }
+});
+
 test('aldi: retailer page caps advance by the advertised page size', async () => {
   const first={data:[{id:'P0',name:'Store'},{id:'P1',name:'Store'}],meta:{pagination:{limit:2,totalCount:3}}};
   const second={data:[{id:'D600',name:'Later store'}],meta:{pagination:{limit:2,totalCount:3}}};

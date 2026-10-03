@@ -372,7 +372,7 @@ export class AldiIrelandProvider implements GroceryProvider {
   }
 
   private async storePage(options: StoreSearchOptions): Promise<{
-    stores: Store[]; rawCount: number; pageSize: number; totalCount?: number;
+    stores: Store[]; invalidStoreIds: string[]; rawCount: number; pageSize: number; totalCount?: number;
   }> {
     const selection = storeLookupOptions(options);
     const url = new URL(this.servicePointsUrl);
@@ -396,7 +396,13 @@ export class AldiIrelandProvider implements GroceryProvider {
       ? root.data
       : data.servicePoints ?? data.items ?? data.results;
     const rows = requireRecordArray(source, 'Aldi Ireland stores', 'service-point collection');
-    const stores = rows.map(aldiStore).filter((store): store is Store => store !== undefined);
+    const mappedStores = rows.map(aldiStore);
+    const stores = mappedStores.filter((store): store is Store => store !== undefined);
+    const invalidStoreIds = rows.flatMap((row, index) => {
+      if (mappedStores[index]) return [];
+      const id = firstString(row.servicePoint, asRecord(row.servicePoint).id, row.id);
+      return id ? [normalizedStoreId(id)] : [];
+    });
     if (Array.isArray(source) && source.length > 0 && stores.length === 0) {
       throw new ProviderProtocolError('Aldi Ireland stores', 'service-point collection contained no valid stores');
     }
@@ -411,7 +417,7 @@ export class AldiIrelandProvider implements GroceryProvider {
         (totalCount !== undefined && (!Number.isInteger(totalCount) || totalCount < 0))) {
       throw new ProviderProtocolError('Aldi Ireland stores', 'invalid store pagination metadata');
     }
-    return { stores, rawCount: (source as unknown[]).length, pageSize, totalCount };
+    return { stores, invalidStoreIds, rawCount: (source as unknown[]).length, pageSize, totalCount };
   }
 
   async selectStore(storeId: string): Promise<void> {
@@ -425,7 +431,10 @@ export class AldiIrelandProvider implements GroceryProvider {
     let offset = 0;
     for (let page = 0; page < STORE_LOOKUP_MAX_PAGES; page++) {
       const result = await this.storePage({ limit: STORE_LOOKUP_MAX, offset });
-      const { stores, rawCount, pageSize, totalCount } = result;
+      const { stores, invalidStoreIds, rawCount, pageSize, totalCount } = result;
+      if (invalidStoreIds.includes(selectedStoreId)) {
+        throw new ProviderProtocolError('Aldi Ireland stores', `service point ${selectedStoreId} had an invalid store record`);
+      }
       if (stores.some((store) => store.store_id === selectedStoreId)) {
         this.validatedStoreIds.add(selectedStoreId);
         return selectedStoreId;
