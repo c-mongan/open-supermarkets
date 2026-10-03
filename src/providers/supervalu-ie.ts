@@ -297,9 +297,13 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const normalizedQuery = requireQuery(query);
     const limit = clampLimit(options.limit, 10, 50);
     const offset = clampOffset(options.offset);
-    if (this.verifiedStoreId !== this.storeId) await this.selectStore(this.storeId);
+    const selectedStoreId = normalizedStoreId(this.storeId);
+    if (this.verifiedStoreId !== selectedStoreId) {
+      await this.listStores({ retailerStoreId: selectedStoreId, limit: 1 });
+      if (this.storeId === selectedStoreId) this.verifiedStoreId = selectedStoreId;
+    }
     const url = new URL(
-      `${this.gatewayBase.replace(/\/$/, '')}/stores/${encodeURIComponent(this.storeId)}/search`
+      `${this.gatewayBase.replace(/\/$/, '')}/stores/${encodeURIComponent(selectedStoreId)}/search`
     );
     url.searchParams.set('q', normalizedQuery);
     url.searchParams.set('take', String(limit));
@@ -486,6 +490,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       );
     }
     const filtered = stores.filter((store) =>
+      (!selection.retailerStoreId || store.store_id === selection.retailerStoreId) &&
       storeMatches(store, selection.fullTextSearch, selection.postcode)
     );
     const offset = localFilter || selection.latitude !== undefined ? selection.offset : 0;

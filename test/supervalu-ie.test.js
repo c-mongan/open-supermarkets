@@ -433,6 +433,36 @@ test('supervalu: registry and legacy factory declare only tested capabilities', 
   assert.equal(ProviderFactory.create('supervalu-ie').name, 'supervalu-ie');
 });
 
+test('supervalu: exact store filter applies before limit', async () => {
+  const provider = new SuperValuIrelandProvider({fetcher: queueFetch([{items: [
+    {retailerStoreId:'A',name:'Store A'}, {retailerStoreId:'B',name:'Store B'}
+  ]}])});
+  const stores = await provider.listStores({retailerStoreId:'B',limit:1});
+  assert.deepEqual(stores.map(store => store.store_id), ['B']);
+});
+
+test('supervalu: implicit validation cannot overwrite a concurrent explicit selection', async () => {
+  let finishValidation;
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({storeId:'A',fetcher:async input => {
+    const url = new URL(input);
+    calls.push(url);
+    if (url.pathname === '/api/stores' && url.searchParams.get('RetailerStoreId') === 'A') {
+      return new Promise(resolve => { finishValidation = () => resolve(response({items:[{retailerStoreId:'A',name:'Store A'}]})); });
+    }
+    if (url.pathname === '/api/stores') return response({items:[{retailerStoreId:'B',name:'Store B'}]});
+    return response(jsonFixture('supervalu-gateway.json'));
+  }});
+  const first = provider.search('milk');
+  await provider.selectStore('B');
+  finishValidation();
+  await first;
+  await provider.search('milk');
+  assert.deepEqual(calls.filter(url => url.pathname.endsWith('/search')).map(url => url.pathname), [
+    '/api/stores/A/search', '/api/stores/B/search'
+  ]);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);
