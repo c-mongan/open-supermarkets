@@ -211,7 +211,7 @@ function parseHtmlProducts(
     const href = extractAttribute(match[0], 'href');
     if (!href) return false;
     try {
-      const link = new URL(href.replace(/&amp;|&#0*38;|&#x0*26;/gi, '&'), baseUrl);
+      const link = new URL(href.replace(/&amp;|&#0*38;|&#x0*26;/gi, '&'), new URL('/search', baseUrl));
       const page = link.searchParams.get('page');
       return link.pathname === '/search' && link.searchParams.get('q') === query &&
         page !== null && /^\d+$/.test(page) && Number(page) > 1;

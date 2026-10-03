@@ -352,6 +352,17 @@ test('mrprice: canonical identity removes collection scope and fragment', async 
   assert.equal(fallback.product_uid,'https://www.mrprice.online/products/item');
 });
 
+
+test('mrprice: resolves query-relative pagination against search path', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="?q=milk&amp;page=2">Next</a>';
+  await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2}), /further pages are unsupported/);
+});
+
+test('mrprice: surfaces fallback errors after short predictive response', async () => {
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([jsonFixture('mrprice-predictive.json'),{body:'limited',status:429}])});
+  await rejects(() => provider.search('milk',{limit:10}), /HTTP 429/);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
