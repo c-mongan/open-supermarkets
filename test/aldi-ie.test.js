@@ -582,6 +582,11 @@ test('aldi: contradictory store offsets and totals fail protocol validation', as
   assert.deepEqual(await empty.listStores(),[]);
 });
 
+test('aldi: a valid empty page beyond the catalogue end stays empty', async () => {
+  const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[],meta:{pagination:{offset:10,totalCount:1}}}])});
+  assert.deepEqual(await p.listStores({offset:10}),[]);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

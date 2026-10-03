@@ -392,7 +392,8 @@ export class AldiIrelandProvider implements GroceryProvider {
         (pagination.totalCount !== undefined && totalCount === undefined) ||
         !Number.isInteger(pageSize) || pageSize < 1 || pageSize > selection.limit ||
         rawCount > pageSize ||
-        (totalCount !== undefined && (!Number.isSafeInteger(totalCount) || totalCount < selection.offset + rawCount))) {
+        (totalCount !== undefined && (!Number.isSafeInteger(totalCount) || totalCount < 0 ||
+          (rawCount > 0 && totalCount < selection.offset + rawCount)))) {
       throw new ProviderProtocolError('Aldi Ireland stores', 'invalid store pagination metadata');
     }
     return { stores, invalidStoreIds, rawCount, pageSize, totalCount };
