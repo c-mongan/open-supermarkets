@@ -195,10 +195,10 @@ test('mrprice: does not hide a predictive endpoint server error', async () => {
 });
 
 
-test('mrprice: preserves numeric IDs, title sizes and conflicting stock uncertainty', async () => {
+test('mrprice: uses canonical URLs for numeric IDs, title sizes and conflicting stock uncertainty', async () => {
   const provider = new MrPriceIrelandProvider({ fetcher: queueFetch([{resources: {results: {products: [{id: 9822467555664, title: 'Milk 110g', price: '3.99', url: '/products/milk?tracking=1', available: true, tags: ['Out of stock']}]}}}]) });
   const [product] = await provider.search('milk', {limit:1});
-  assert.equal(product.product_uid, '9822467555664');
+  assert.equal(product.product_uid, 'https://www.mrprice.online/products/milk');
   assert.equal(product.size, '110g');
   assert.equal(product.in_stock, null);
 });
@@ -206,9 +206,10 @@ test('mrprice: preserves numeric IDs, title sizes and conflicting stock uncertai
 test('mrprice: rejects invalid queries/options before requests', async () => {
   const calls=[];
   const provider = new MrPriceIrelandProvider({fetcher: queueFetch([], calls)});
-  for (const [q, options] of [[' ', {}], ['milk', {limit: 0}], ['milk', {offset: -1}], ['milk', {category: 'dairy'}]]) {
+  for (const [q, options] of [[' ', {}], ['milk', {limit: 0}], ['milk', {offset: -1}], ]) {
     await assert.rejects(() => provider.search(q, options), RangeError);
   }
+  await rejects(() => provider.search('milk', {category:'dairy'}), /category filtering is unsupported/);
   assert.equal(calls.length, 0);
 });
 
@@ -253,7 +254,7 @@ test('mrprice: HTML uses named link after image link and preserves product ID', 
   const html='<div id="js-product-ajax"><div class="product-card" data-price="399"><a href="/products/milk?tracking=1"><img src="/milk.jpg"></a><span class="shopify-product-reviews-badge" data-id="9822467555664"></span><a href="/products/milk?tracking=1" title="Dairy Milk 110g">Dairy Milk 110g</a></div></div>';
   const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk');
   assert.equal(product.name,'Dairy Milk 110g');
-  assert.equal(product.product_uid,'9822467555664');
+  assert.equal(product.product_uid,'https://www.mrprice.online/products/milk');
   assert.equal(product.size,'110g');
   assert.equal(product.retail_price.price,3.99);
 });
@@ -287,7 +288,7 @@ test('mrprice: matches exact class tokens and badge attributes in any order', as
   const html='<div id="js-product-ajax"><div class="product-card other" data-price="199"><div class="product-card-price">Price</div><a href="/products/item" title="Item 1L">Item 1L</a><span data-id="1234" class="badge shopify-product-reviews-badge"></span></div></div>';
   const products=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
   assert.equal(products.length,1);
-  assert.equal(products[0].product_uid,'1234');
+  assert.equal(products[0].product_uid,'https://www.mrprice.online/products/item');
 });
 
 test('mrprice: rejects fractional HTML cents', async () => {
@@ -327,6 +328,18 @@ test('mrprice: exact grid id ignores an earlier data-id lookalike', async () => 
   const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
   assert.equal(product.name,'Item');
   assert.equal(product.retail_price.price,1.99);
+});
+
+
+test('mrprice: canonical identity matches predictive and badge-less HTML paths', async () => {
+  const payload={resources:{results:{products:[{id:'gid://shopify/Product/3001',title:'Item',price:'1.99',url:'/products/item?tracking=1'}]}}};
+  const [predictive]=await new MrPriceIrelandProvider({fetcher:queueFetch([payload])}).search('item',{limit:1});
+  for(const badge of ['', '<span class="shopify-product-reviews-badge" data-id="3001"></span>']) {
+    const html='<div id="js-product-ajax"><div class="product-card" data-price="199">'+badge+'<a href="/products/item?tracking=2">Item</a></div></div>';
+    const [fallback]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+    assert.equal(predictive.product_uid,fallback.product_uid);
+    assert.equal(fallback.product_uid,'https://www.mrprice.online/products/item');
+  }
 });
 
 async function main() {

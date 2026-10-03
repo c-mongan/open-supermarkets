@@ -61,15 +61,13 @@ function mapPredictiveProduct(
   const url = absoluteUrl(baseUrl, firstString(item.url)?.split('?')[0]);
   const price = shopifyMoney(item.price);
   if (!name || !url || price === undefined) return undefined;
-  const id = typeof item.id === 'number' && Number.isSafeInteger(item.id) && item.id > 0
-    ? String(item.id) : firstString(item.id, item.handle, url)!;
   const soldOut = Array.isArray(item.tags) && item.tags.some(tag =>
     typeof tag === 'string' && /^(?:out of stock|sold out)$/i.test(tag));
   let inStock: boolean | null = null;
   if (soldOut && item.available !== true) inStock = false;
   else if (!soldOut && typeof item.available === 'boolean') inStock = item.available;
   return {
-    product_uid: id,
+    product_uid: url,
     name,
     retail_price: { price },
     in_stock: inStock,
@@ -129,11 +127,8 @@ function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
     extractAttribute(openTag, 'class') ?? ''
   );
 
-  const badge = [...card.matchAll(/<[^>]+>/g)].find(match => hasClass(match[0], 'shopify-product-reviews-badge'))?.[0];
-  const productId = badge ? extractAttribute(badge, 'data-id') : undefined;
-
   return {
-    product_uid: productId && /^\d+$/.test(productId) ? productId : url,
+    product_uid: url,
     name,
     size: name.match(/\b\d+(?:[.,]\d+)?\s*(?:kg|g|ml|l|pack)(?:\b|$)/i)?.[0],
     retail_price: { price },
@@ -255,7 +250,7 @@ export class MrPriceIrelandProvider implements GroceryProvider {
   }
 
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
-    if (options.category) throw new RangeError('Mr Price Ireland does not support category filtering');
+    if (options.category) throw new ProviderInputError('Mr Price Ireland', 'category filtering is unsupported');
     const normalizedQuery = requireQuery(query);
     const limit = clampLimit(options.limit, 10, 20);
     const offset = clampOffset(options.offset);
