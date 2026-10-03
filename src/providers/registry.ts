@@ -93,6 +93,19 @@ export const PROVIDERS: ProviderManifest[] = [
     load: async () => (await import('./ah')).AlbertHeijnBEProvider,
   },
 
+  {
+    id: 'supervalu-ie',
+    label: 'SuperValu Ireland',
+    country: 'IE',
+    capabilities: ['search', 'stores'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit:
+      'Protocol reimplemented from but3k4/supermarket-mcp (MIT) and independently cross-checked Irish store gateway evidence',
+    load: async () => (await import('./supervalu-ie')).SuperValuIrelandProvider,
+  },
+
   // ── Spain ────────────────────────────────────────────────────────────
   {
     id: 'mercadona',
