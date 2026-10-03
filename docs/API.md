@@ -150,9 +150,9 @@ must contain a valid query and an optional positive integer limit; upstream fail
 
 | Surface | Store lookup | Store-scoped search |
 |---------|--------------|---------------------|
-| CLI | `supermarket -p <id> stores [--query --postcode --latitude --longitude --range --mode --limit]` | `supermarket -p <id> --store-id <store> search milk` (also `--batch`) |
+| CLI | `supermarket -p <id> [--store-id <store>] stores [--query --postcode --latitude --longitude --range --mode --limit]` | `supermarket -p <id> --store-id <store> search milk` (also `--batch`) |
 | HTTP | `GET /stores?provider=<id>&query=&postcode=&latitude=&longitude=&range=&mode=&limit=&store_id=` | `GET /search?provider=<id>&q=milk&store_id=<store>` |
-| MCP | `grocery_stores` | `store_id` on `grocery_search` / `grocery_search_batch` |
+| MCP | `grocery_stores` (optional `store_id` for exact lookup) | `store_id` on `grocery_search` / `grocery_search_batch` |
 
 Input is validated, and the capability is checked from the manifest, before any
 provider code loads or any request is made. Over HTTP, invalid input returns `400`
