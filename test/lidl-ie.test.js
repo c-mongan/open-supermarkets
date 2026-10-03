@@ -53,14 +53,13 @@ test('Lidl uses regional regular price before loyalty price', async () => {
   assert.equal(product.retail_price.price, 2.79);
 });
 
-test('Lidl uses the old regular price next to a loyalty offer', async () => {
+test('Lidl rejects an old loyalty price without an explicit regular price', async () => {
   const payload = { items: [{ gridbox: { data: {
     id: 'regular', fullTitle: 'Milk', regionsPrices: { '1': {
       currentLidlPlusPrice: { price: { price: '€1.99', oldPrice: '€2.49' } },
     } },
   } } }] };
-  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
-  assert.equal(product.retail_price.price, 2.49);
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
 });
 
 test('Lidl preserves unknown stock when badges conflict', async () => {
@@ -160,4 +159,17 @@ test('Lidl matches complete stock labels without treating negation as available'
     const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
     assert.equal(product.in_stock, expected, text);
   }
+});
+
+
+test('Lidl omits loyalty-only rows while retaining products with regular prices', async () => {
+  const payload = fixture();
+  payload.items.push({ gridbox: { data: {
+    id: 'loyalty-only', fullTitle: 'Loyalty Milk', regionsPrices: { '1': {
+      currentLidlPlusPrice: { price: { price: 1.99, oldPrice: 2.49 } },
+    } },
+  } } });
+  const products = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(products.length, 2);
+  assert.equal(products.some((product) => product.product_uid === 'loyalty-only'), false);
 });
