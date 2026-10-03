@@ -57,6 +57,17 @@ export const PROVIDERS: ProviderManifest[] = [
 
   // ── Ireland ──────────────────────────────────────────────────────────
   {
+    id: 'tesco-ie',
+    label: 'Tesco Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'api-key',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
+    load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
+  },
+  {
     id: 'lidl-ie',
     label: 'Lidl Ireland',
     country: 'IE',
