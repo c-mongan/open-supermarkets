@@ -18,10 +18,13 @@ async function main() {
   const originalExists = fs.existsSync;
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({name:'tesco-ie-capability-regression',version:'1.0.0'});
-  let server, connection, calls = 0, networkCalls = 0, loads = 0;
+  let server, connection, calls = 0, networkCalls = 0, loads = 0, sessionReads = 0;
   try {
     assert.equal(getManifest('tesco-ie').auth, 'anonymous');
-    fs.existsSync = path => String(path).endsWith('/session.json') ? false : originalExists(path);
+    fs.existsSync = path => {
+      if (String(path).endsWith('/session.json')) { sessionReads++; return false; }
+      return originalExists(path);
+    };
     const rejectNetwork = () => {
       networkCalls++;
       throw new Error('Unexpected retailer request');
@@ -56,10 +59,30 @@ async function main() {
       assert.match(JSON.stringify(result.content),/fixture-product/);
     }
     assert.equal(calls,2);
-    for(const name of ['grocery_login','grocery_basket','grocery_add','grocery_checkout','grocery_stores']) {
-      const result = await client.callTool({name,arguments:{provider:'tesco-ie',product_id:'fixture-product'}});
+    const loadsBeforeGuards = loads;
+    const sessionReadsBeforeGuards = sessionReads;
+    const unsupported = [
+      {name:'grocery_login',args:{email:'fixture@example.test',password:'fixture-only'},reason:/Catalogue search only/},
+      {name:'grocery_basket_view',args:{},reason:/Missing capability: basket/},
+      {name:'grocery_basket_add',args:{product_id:'fixture-product',quantity:1},reason:/Missing capability: basket/},
+      {name:'grocery_checkout',args:{dry_run:true},reason:/Missing capability: checkout/},
+      {name:'grocery_stores',args:{},reason:/does not support "stores"/},
+    ];
+    for(const {name,args,reason} of unsupported) {
+      const tool = tools.tools.find(tool => tool.name === name);
+      assert.ok(tool, `${name} is an advertised MCP tool`);
+      const toolArguments = {provider:'tesco-ie',...args};
+      for(const key of tool.inputSchema.required || []) {
+        assert.ok(Object.hasOwn(toolArguments,key), `${name} supplies required argument ${key}`);
+      }
+      const result = await client.callTool({name,arguments:toolArguments});
       assert.equal(result.isError,true,name);
-      assert.match(JSON.stringify(result.content),/does not support/i,name);
+      const text = result.content.filter(content => content.type === 'text').map(content => content.text).join('\n');
+      assert.match(text,reason,name);
+      assert.doesNotMatch(text,/not logged in|unknown tool/i,name);
+      assert.equal(loads,loadsBeforeGuards, `${name} fails before provider loading`);
+      assert.equal(sessionReads,sessionReadsBeforeGuards, `${name} fails before authentication`);
+      assert.equal(networkCalls,0, `${name} makes no network request`);
     }
     assert.equal(calls,2);
     assert.ok(loads > 0, 'MCP used the intercepted registry loader');
