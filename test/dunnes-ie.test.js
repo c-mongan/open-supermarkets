@@ -464,4 +464,12 @@ test('dunnes: store errors remain errors, including WAF HTML', async () => {
   }
 });
 
+test('dunnes: rejects string prices that overflow to Infinity', async () => {
+  const p = new DunnesIrelandProvider({storeId:'258',fetcher:queueFetch([
+    jsonFixture('dunnes-stores.json'),
+    {items:[{sku:'1',name:'Bread',price:'9'.repeat(400)}]}
+  ])});
+  await assert.rejects(() => p.search('bread'), /no valid products/);
+});
+
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });

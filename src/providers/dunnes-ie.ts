@@ -63,7 +63,9 @@ function priceNumber(value: unknown): number | undefined {
   if (typeof value === 'number') return Number.isFinite(value) && value >= 0 ? value : undefined;
   if (typeof value !== 'string') return undefined;
   const match = value.trim().match(/^(?:€|EUR\s*)?([0-9]+(?:[.,][0-9]+)?)$/i);
-  return match ? Number(match[1].replace(',', '.')) : undefined;
+  if (!match) return undefined;
+  const parsed = Number(match[1].replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function gatewayProduct(item: Record<string, unknown>): Product | undefined {
