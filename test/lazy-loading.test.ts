@@ -256,7 +256,7 @@ console.log('\nregistry/factory parity');
   check('existing manifest entries retain synchronous constructors', () => {
     const broken: string[] = [];
     for (const m of PROVIDERS) {
-      if (m.id === 'lidl-ie') continue; // search-only via async search routes
+      if (m.id === 'lidl-ie' || m.id === 'aldi-ie') continue; // search-only via async search routes
       try {
         ProviderFactory.create(m.id);
       } catch (err: any) {

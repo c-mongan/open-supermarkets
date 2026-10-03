@@ -1,0 +1,353 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const fixture = (name) => fs.readFileSync(path.join(__dirname, 'fixtures', name), 'utf8');
+const jsonFixture = (name) => JSON.parse(fixture(name));
+const { AldiIrelandProvider } = require('../dist/providers/aldi-ie.js');
+
+function response(body, status = 200, headers = {}) {
+  const text = typeof body === 'string' ? body : JSON.stringify(body);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: status === 200 ? 'OK' : 'Error',
+    headers: {
+      get(name) {
+        return headers[String(name).toLowerCase()] ?? null;
+      },
+    },
+    async text() {
+      return text;
+    },
+  };
+}
+
+function queueFetch(entries, calls = []) {
+  const queue = [...entries];
+  const fetcher = async (input, init = {}) => {
+    const call = { url: String(input), init };
+    calls.push(call);
+    if (queue.length === 0) {
+      throw new Error(`Unexpected fetch: ${call.url}`);
+    }
+    const next = queue.shift();
+    if (typeof next === 'function') return next(call);
+    if (next && Object.prototype.hasOwnProperty.call(next, 'body')) {
+      return response(next.body, next.status ?? 200, next.headers ?? {});
+    }
+    return response(next);
+  };
+  fetcher.remaining = () => queue.length;
+  return fetcher;
+}
+
+const tests = [];
+function test(name, fn) {
+  tests.push({ name, fn });
+}
+
+async function rejects(fn, pattern) {
+  await assert.rejects(fn, pattern);
+}
+
+test('aldi: sends Irish currency, walk-in service, query, and offset', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([jsonFixture('aldi-search.json')], calls),
+  });
+  await provider.search('milk', { limit: 10, offset: 12 });
+  const url = new URL(calls[0].url);
+  assert.equal(url.searchParams.get('q'), 'milk');
+  assert.equal(url.searchParams.get('currency'), 'EUR');
+  assert.equal(url.searchParams.get('serviceType'), 'walk-in');
+  assert.equal(url.searchParams.get('offset'), '12');
+});
+
+test('aldi: rounds request size to an API-supported page size', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([jsonFixture('aldi-search.json')], calls),
+  });
+  await provider.search('milk', { limit: 13 });
+  assert.equal(new URL(calls[0].url).searchParams.get('limit'), '16');
+});
+
+test('aldi: maps brand, price, EUR, and stable SKU', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([jsonFixture('aldi-search.json')]),
+  });
+  const [product] = await provider.search('milk');
+  assert.equal(product.product_uid, 'aldi-1001');
+  assert.equal(product.name, 'Clonbawn Fresh Irish Milk');
+  assert.equal(product.retail_price.price, 1.39);
+  assert.equal(product.currency, 'EUR');
+});
+
+test('aldi: converts documented minor-unit prices when display price is absent', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([
+      {
+        data: [
+          {
+            sku: 'aldi-live-shape-239',
+            name: 'Fallback Milk',
+            price: { amountRelevant: 239 },
+          },
+        ],
+      },
+    ]),
+  });
+  const [product] = await provider.search('milk');
+  assert.equal(product.retail_price.price, 2.39);
+});
+
+test('aldi: maps unit price, size, and image template', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([jsonFixture('aldi-search.json')]),
+  });
+  const [product] = await provider.search('milk');
+  assert.deepEqual(product.unit_price, { price: 1.2, measure: '1 L' });
+  assert.equal(product.size, '2 L');
+  assert.equal(
+    product.image_url,
+    'https://dm.example.test/600/clonbawn-fresh-irish-milk.jpg'
+  );
+});
+
+test('aldi: reports unknown availability when product stock is absent', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([jsonFixture('aldi-search.json')]),
+  });
+  const products = await provider.search('yogurt');
+  assert.equal(products[1].in_stock, null);
+});
+
+test('aldi: maps only explicit product availability fields to stock', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([{ data: [
+      { sku: 'available', name: 'Available Milk', price: { amountRelevant: 199 }, available: true },
+      { sku: 'unavailable', name: 'Unavailable Milk', price: { amountRelevant: 199 }, outOfStock: true },
+      {
+        sku: 'conflicting',
+        name: 'Conflicting Milk',
+        price: { amountRelevant: 199 },
+        available: true,
+        outOfStock: true,
+      },
+    ] }]),
+  });
+  const products = await provider.search('milk');
+  assert.deepEqual(products.map((product) => product.in_stock), [true, false, null]);
+});
+
+test('aldi: refuses to search without an explicit store selection', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({ fetcher: queueFetch([], calls) });
+  await rejects(() => provider.search('milk'), /requires a store id/i);
+  assert.equal(calls.length, 0);
+});
+
+test('aldi: lists anonymous walk-in stores using the official service-point schema', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    fetcher: queueFetch([jsonFixture('aldi-stores.json')], calls),
+  });
+  const stores = await provider.listStores({
+    limit: 4,
+    offset: 2,
+    fullTextSearch: 'Dublin',
+  });
+  assert.deepEqual(stores, [{
+    store_id: 'D001', name: "King's Court, Parnell Street Unit 6/7", postcode: 'D01 F295',
+    address: "King's Court, Parnell Street Unit 6/7, Dublin, Ireland",
+    location: { latitude: 53.35028, longitude: -6.26599 }, shopping_modes: ['walk-in'],
+  }]);
+  const url = new URL(calls[0].url);
+  assert.equal(url.searchParams.get('offset'), '2');
+  assert.equal(url.searchParams.get('limit'), '4');
+  assert.equal(url.searchParams.get('serviceType'), 'walk-in');
+  assert.equal(url.searchParams.get('fullTextSearch'), 'Dublin');
+  assert.equal(url.searchParams.get('addressZipcode'), null);
+  assert.equal(url.searchParams.get('includeNearbyServicePoints'), null);
+});
+
+test('aldi: sends the official postcode and nearby-store query parameters', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    fetcher: queueFetch([jsonFixture('aldi-stores.json'), jsonFixture('aldi-stores.json')], calls),
+  });
+  await provider.listStores({ postcode: 'D01 F295' });
+  await provider.listStores({ limit: 4, latitude: 53.35, longitude: -6.26 });
+  const postcodeUrl = new URL(calls[0].url);
+  assert.equal(postcodeUrl.searchParams.get('addressZipcode'), 'D01 F295');
+  assert.equal(postcodeUrl.searchParams.get('postcode'), null);
+  const nearbyUrl = new URL(calls[1].url);
+  assert.equal(nearbyUrl.searchParams.get('latitude'), '53.35');
+  assert.equal(nearbyUrl.searchParams.get('longitude'), '-6.26');
+  assert.equal(nearbyUrl.searchParams.get('includeNearbyServicePoints'), 'true');
+});
+
+test('aldi: validates selected service points and scopes search with uppercase servicePoint', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    fetcher: queueFetch([jsonFixture('aldi-stores.json'), jsonFixture('aldi-search.json')], calls),
+  });
+  await provider.selectStore('d001');
+  await provider.search('milk');
+  assert.equal(new URL(calls[1].url).searchParams.get('servicePoint'), 'D001');
+});
+
+test('aldi: rejects incomplete store coordinates and unknown service points', async () => {
+  const provider = new AldiIrelandProvider({ fetcher: queueFetch([]) });
+  await rejects(() => provider.listStores({ latitude: 53.35 }), /latitude and longitude/);
+  await rejects(
+    () => provider.listStores({ fullTextSearch: 'Dublin', latitude: 53.35, longitude: -6.26 }),
+    /fullTextSearch cannot be combined/
+  );
+  await rejects(
+    () => provider.listStores({ fullTextSearch: 'Dublin', postcode: 'D01 F295' }),
+    /fullTextSearch cannot be combined with postcode/
+  );
+  await rejects(
+    () => provider.listStores({ postcode: 'D01 F295', latitude: 53.35, longitude: -6.26 }),
+    /postcode cannot be combined with coordinates/
+  );
+  await rejects(() => provider.listStores({ range: 5 }), /does not support a range filter/);
+  await rejects(
+    () => provider.listStores({ shoppingMode: 'delivery' }),
+    /walk-in service points only/
+  );
+  await rejects(
+    () => provider.listStores({ retailerStoreId: 'D001' }),
+    /does not support retailerStoreId filtering/
+  );
+  const unknown = new AldiIrelandProvider({ fetcher: queueFetch([jsonFixture('aldi-stores.json')]) });
+  await rejects(() => unknown.selectStore('d999'), /service point D999 was not found/);
+});
+
+test('aldi: falls back to the legacy host only for a missing primary route', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([
+      { body: 'not found', status: 404 },
+      jsonFixture('aldi-search.json'),
+    ], calls),
+  });
+  const products = await provider.search('milk');
+  assert.equal(products.length, 2);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].url, /api\.aldi\.ie/);
+});
+
+test('aldi: does not retry a blocked request against another host', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([{ body: 'forbidden', status: 403 }], calls),
+  });
+  await rejects(() => provider.search('milk'), /HTTP 403/);
+  assert.equal(calls.length, 1);
+});
+
+test('aldi: rejects an empty query before networking', async () => {
+  const calls = [];
+  const provider = new AldiIrelandProvider({ fetcher: queueFetch([], calls) });
+  await rejects(() => provider.search(' '), /query must not be empty/);
+  assert.equal(calls.length, 0);
+});
+
+test('aldi: rejects a malformed product collection instead of returning an empty shelf', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([{ data: 'wrong-shape' }]),
+  });
+  await rejects(() => provider.search('milk'), /data|array|protocol/i);
+});
+
+test('aldi: does not invent identity, price, or stock for a malformed row', async () => {
+  const provider = new AldiIrelandProvider({
+    storeId: 'D001',
+    fetcher: queueFetch([{ data: [{}] }]),
+  });
+  await rejects(() => provider.search('milk'), /valid product|identifier|price|malformed/i);
+});
+
+test('aldi: distinguishes empty from invalid product and store collections', async () => {
+  for (const data of [[null], [1], [[]]]) {
+    const p = new AldiIrelandProvider({storeId:'D001', fetcher:queueFetch([{data}])});
+    await rejects(() => p.search('milk'), /no valid products/);
+    const q = new AldiIrelandProvider({fetcher:queueFetch([{data}])});
+    await rejects(() => q.listStores(), /no valid stores/);
+  }
+  const p = new AldiIrelandProvider({storeId:'D001', fetcher:queueFetch([{data:[]}])});
+  assert.deepEqual(await p.search('milk'), []);
+});
+
+test('aldi: category filtering and invalid pagination fail before networking', async () => {
+  const calls = []; const p = new AldiIrelandProvider({storeId:'D001',fetcher:queueFetch([],calls)});
+  await rejects(() => p.search('milk',{category:'dairy'}), /category/);
+  await rejects(() => p.search('milk',{limit:0}), /positive integer/);
+  await rejects(() => p.search('milk',{offset:-1}), /non-negative integer/);
+  assert.equal(calls.length,0);
+});
+
+test('aldi: rates and server failures never trigger fallback', async () => {
+  for(const status of [401,429,500]) {
+    const calls=[]; const p=new AldiIrelandProvider({storeId:'D001',fetcher:queueFetch([{body:'failure',status}],calls)});
+    await rejects(() => p.search('milk'),new RegExp('HTTP '+status));
+    assert.equal(calls.length,1);
+  }
+});
+
+test('aldi: rejects negative prices and preserves zero prices', async () => {
+  const p=new AldiIrelandProvider({storeId:'D001', fetcher:queueFetch([{data:[
+    {sku:'invalid',name:'Invalid',price:{amountRelevant:-1}},
+    {sku:'free',name:'Free',price:{amountRelevant:0}}
+  ]}])});
+  const result=await p.search('milk');assert.equal(result.length,1);assert.equal(result[0].retail_price.price,0);
+});
+
+test('aldi: per-request store selection does not leak into later searches', async () => {
+  const calls=[];const p=new AldiIrelandProvider({storeId:'D002',fetcher:queueFetch([
+    jsonFixture('aldi-stores.json'),jsonFixture('aldi-search.json'),jsonFixture('aldi-search.json')
+  ],calls)});
+  await p.search('milk',{storeId:'d001'});await p.search('milk');
+  assert.equal(new URL(calls[1].url).searchParams.get('servicePoint'),'D001');
+  assert.equal(new URL(calls[2].url).searchParams.get('servicePoint'),'D002');
+});
+
+test('aldi: amount fallback is cents and missing prices fail truthfully', async () => {
+  const p = new AldiIrelandProvider({storeId:'D001',fetcher:queueFetch([{data:[
+    {sku:'raw-amount',name:'Milk',price:{amount:239}}
+  ]}])});
+  assert.equal((await p.search('milk'))[0].retail_price.price,2.39);
+  const q = new AldiIrelandProvider({storeId:'D001',fetcher:queueFetch([{data:[{sku:'no-price',name:'Milk'}]}])});
+  await rejects(()=>q.search('milk'),/no valid products/);
+});
+
+async function main() {
+  let passed = 0;
+  const failures = [];
+  for (const { name, fn } of tests) {
+    try {
+      await fn();
+      passed += 1;
+      process.stdout.write(`✓ ${name}\n`);
+    } catch (error) {
+      failures.push({ name, error });
+      process.stderr.write(`✗ ${name}\n  ${error?.stack || error}\n`);
+    }
+  }
+  process.stdout.write(`\n${passed}/${tests.length} tests passed.\n`);
+  if (failures.length > 0) process.exitCode = 1;
+}
+
+main();

@@ -57,6 +57,18 @@ export const PROVIDERS: ProviderManifest[] = [
 
   // ── Ireland ──────────────────────────────────────────────────────────
   {
+    id: 'aldi-ie',
+    label: 'Aldi Ireland',
+    country: 'IE',
+    capabilities: ['search', 'stores'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit:
+      'Protocol reimplemented from AviBackToBlack/lidaldi and but3k4/supermarket-mcp (MIT)',
+    load: async () => (await import('./aldi-ie')).AldiIrelandProvider,
+  },
+  {
     id: 'lidl-ie',
     label: 'Lidl Ireland',
     country: 'IE',
