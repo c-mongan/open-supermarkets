@@ -342,6 +342,16 @@ test('mrprice: canonical identity matches predictive and badge-less HTML paths',
   }
 });
 
+
+test('mrprice: canonical identity removes collection scope and fragment', async () => {
+  const payload={resources:{results:{products:[{title:'Item',price:'1.99',url:'/products/item?tracking=1'}]}}};
+  const [predictive]=await new MrPriceIrelandProvider({fetcher:queueFetch([payload])}).search('item',{limit:1});
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/collections/milk/products/item?tracking=2#variant">Item</a></div></div>';
+  const [fallback]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(fallback.product_uid,predictive.product_uid);
+  assert.equal(fallback.product_uid,'https://www.mrprice.online/products/item');
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

@@ -12,7 +12,7 @@ node dist/cli.js search milk --provider mrprice-ie --limit 3 --json
 
 The provider uses Shopify predictive search with at most 10 suggestions. Predictive prices are in EUR. If the requested window is outside predictive results, or that endpoint returns 404/410, the provider makes one HTML search request. HTML `data-price` values are cents. The HTML fallback reads only the returned search grid; it does not walk further search pages. If a next-page link exists and the first grid cannot fill the requested window, the provider rejects that window. Limits are capped at 20. HTTP errors and malformed responses raise errors, not empty results.
 
-Product identifiers are canonical product URLs in both predictive and HTML results. Tracking queries are removed, so missing HTML badges do not change identity. Stock is unknown when no explicit signal exists or signals conflict. Pack size is extracted from the product title when present. Invalid product records are discarded; an entirely invalid non-empty response raises an error.
+Product identifiers are canonical product URLs in both predictive and HTML results. Collection prefixes, tracking queries, and fragments are removed, so missing HTML badges do not change identity. Stock is unknown when no explicit signal exists or signals conflict. Pack size is extracted from the product title when present. Invalid product records are discarded; an entirely invalid non-empty response raises an error.
 
 ## Verification on 2026-10-03
 

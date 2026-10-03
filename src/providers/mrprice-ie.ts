@@ -53,12 +53,24 @@ function shopifyMoney(value: unknown, cents = false): number | undefined {
   return parsed;
 }
 
+function canonicalProductUrl(baseUrl: string, value: unknown): string | undefined {
+  const absolute = absoluteUrl(baseUrl, value);
+  if (!absolute) return undefined;
+  const url = new URL(absolute);
+  const product = url.pathname.match(/\/products\/([^/]+)\/?$/);
+  if (!product) return undefined;
+  url.pathname = `/products/${product[1]}`;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
 function mapPredictiveProduct(
   item: Record<string, unknown>,
   baseUrl: string
 ): Product | undefined {
   const name = firstString(item.title, item.name);
-  const url = absoluteUrl(baseUrl, firstString(item.url)?.split('?')[0]);
+  const url = canonicalProductUrl(baseUrl, firstString(item.url));
   const price = shopifyMoney(item.price);
   if (!name || !url || price === undefined) return undefined;
   const soldOut = Array.isArray(item.tags) && item.tags.some(tag =>
@@ -100,7 +112,7 @@ function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
   const anchorStart = anchorMatch?.index;
   if (!anchor || anchorStart === undefined) return undefined;
   const href = extractAttribute(anchor, 'href');
-  const url = absoluteUrl(baseUrl, href?.split('?')[0]);
+  const url = canonicalProductUrl(baseUrl, href);
   if (!url) return undefined;
 
   const title = extractAttribute(anchor, 'title');
