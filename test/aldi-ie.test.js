@@ -433,6 +433,19 @@ test('aldi: malformed pagination metadata fails explicitly', async () => {
   }
 });
 
+test('aldi: scalar store service type is preserved', async () => {
+  const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store',serviceType:'Walk-In'}]}])});
+  assert.deepEqual((await p.listStores())[0].shopping_modes,['walk-in']);
+});
+
+test('aldi: brand prefix requires a complete word', async () => {
+  const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[
+    {sku:'partial',brandName:'Max',name:'Maximum Apples',price:{amountRelevant:139}},
+    {sku:'complete',brandName:'Max',name:'Max Apples',price:{amountRelevant:139}}
+  ]}])});
+  assert.deepEqual((await p.search('apples')).map(p=>p.name),['Max Maximum Apples','Max Apples']);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

@@ -14,24 +14,53 @@ import type {
   StoreSearchOptions,
 } from './types';
 import {
+  asNumber,
+  asString,
   asRecord,
   asRecords,
   clampLimit,
   clampOffset,
-  env,
   explicitBooleanState,
   firstNumber,
   firstString,
   type FetchLike,
-  joinBrandAndName,
   jsonResponse,
-  parseUnitPrice,
   ProviderHttpError,
   ProviderInputError,
   ProviderProtocolError,
   requireRecordArray,
   requireQuery,
 } from './ie/shared';
+
+function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  const match = text.match(/^€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*((?:[0-9]+(?:[.,][0-9]+)?\s*)?(?:kg|g|l|ml|cl|each|ea|unit|pack))$/i);
+  if (!match) return undefined;
+  const price = asNumber(match[1]);
+  const measure = match[2]?.trim();
+  return price !== undefined && measure ? { price, measure } : undefined;
+}
+
+function joinBrandAndName(brand: unknown, name: unknown): string {
+  const b = asString(brand);
+  const n = asString(name);
+  if (!n) return b ?? 'Unknown product';
+  if (!b) return n;
+  const normalize = (value: string) =>
+    value.toLocaleLowerCase('en-IE').replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalizedBrand = normalize(b);
+  const normalizedName = normalize(n);
+  const alreadyNamed = normalizedBrand &&
+    (normalizedName === normalizedBrand || normalizedName.startsWith(`${normalizedBrand} `));
+  return alreadyNamed ? n : `${b} ${n}`;
+}
+
+function env(name: string): string | undefined {
+  const processLike = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  const value = processLike.process?.env?.[name];
+  return asString(value);
+}
 
 const PRIMARY_SEARCH = 'https://asl.api.aldi.ie/commerce/v3/product-search';
 const LEGACY_SEARCH = 'https://api.aldi.ie/v3/product-search';
@@ -111,9 +140,9 @@ function normalizedStoreId(value: unknown): string {
 }
 
 function normalizedModes(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined;
+  const candidates = Array.isArray(value) ? value : [value];
   const modes = new Set<string>();
-  for (const candidate of value) {
+  for (const candidate of candidates) {
     const record = asRecord(candidate);
     const mode = firstString(candidate, record.name, record.mode, record.serviceType);
     if (mode) modes.add(mode.toLowerCase());
