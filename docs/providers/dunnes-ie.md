@@ -19,9 +19,10 @@ const { DunnesIrelandProvider } = require('./dist/providers/dunnes-ie');
 JS
 ```
 
-`DUNNES_IE_STORE_ID` or the constructor `storeId` can supply the store ID. The
-provider verifies it before the first search. Concurrent searches for the same
-store share one pending validation request. A failed request can be retried.
+The constructor `storeId` can supply the store ID for direct provider use. The
+provider verifies it before the first search. Public CLI, HTTP, and MCP requests
+require an explicit store ID; `DUNNES_IE_STORE_ID` is not used. Concurrent
+searches for the same store share one pending validation request. A failed request can be retried.
 Concurrent explicit selections retain the latest requested store.
 A direct `search(query, { storeId })` override is verified for that request and
 does not change the selected store. An optional user-owned cookie can
@@ -65,3 +66,6 @@ Invalid returned coordinates remain absent.
 
 Use the asynchronous registry `createProvider('dunnes-ie')` for integration.
 The legacy full-service synchronous factory does not support this provider.
+
+Protocol research credits [but3k4/supermarket-mcp](https://github.com/but3k4/supermarket-mcp)
+(MIT). The Irish grocery gateway was verified independently.

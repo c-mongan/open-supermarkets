@@ -273,7 +273,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
     if (!Number.isSafeInteger(this.requestTimeoutMs) || this.requestTimeoutMs <= 0 || this.requestTimeoutMs > 2147483647) {
       throw new ProviderInputError('Dunnes Ireland', 'requestTimeoutMs must be an integer from 1 to 2147483647');
     }
-    const storeId = options.storeId ?? env('DUNNES_IE_STORE_ID');
+    const storeId = options.storeId;
     this.storeId = storeId === undefined ? undefined : normalizedStoreId(storeId);
     this.cookieHeader =
       options.cookieHeader ??
@@ -482,7 +482,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
       : normalizedStoreId(options.storeId);
     if (!storeId) {
       throw new ProviderInputError('Dunnes Ireland',
-        'Dunnes gateway search is store-scoped. Set DUNNES_IE_STORE_ID or pass storeId.'
+        'Dunnes gateway search is store-scoped. Select a store or pass storeId.'
       );
     }
     if (options.category !== undefined) {

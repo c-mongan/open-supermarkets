@@ -500,9 +500,10 @@ test('dunnes: filtered pagination and nearby windows do not claim store nonexist
 });
 
 test('dunnes: registration exposes the tested provider capabilities and constructors', async () => {
-  const {getManifest,createProvider}=require('../src/providers/registry');
+  const {getManifest,createProvider,providersFor}=require('../src/providers/registry');
   const {ProviderFactory}=require('../src/providers');
   const manifest=getManifest('dunnes-ie');
+  assert.equal(providersFor('IE','search')[0].id,'lidl-ie');
   assert.equal(manifest.country,'IE');
   assert.equal(manifest.auth,'none');
   assert.equal(manifest.tier,'community');
@@ -513,6 +514,24 @@ test('dunnes: registration exposes the tested provider capabilities and construc
   assert.equal(provider.constructor.name,'DunnesIrelandProvider');
   for(const method of ['search','listStores','selectStore']) assert.equal(typeof provider[method],'function');
   assert.throws(()=>ProviderFactory.create('dunnes-ie'),/no synchronous constructor/);
+});
+
+test('dunnes: environment store IDs cannot enable unscoped public search', async () => {
+  const previous=process.env.DUNNES_IE_STORE_ID;
+  process.env.DUNNES_IE_STORE_ID='258';
+  try {
+    const {createProvider}=require('../src/providers/registry');
+    const provider=await createProvider('dunnes-ie');
+    await assert.rejects(()=>provider.search('bread'),/store-scoped/);
+    const {spawnSync}=require('node:child_process');
+    const result=spawnSync(process.execPath,[path.join(ROOT,'node_modules/tsx/dist/cli.mjs'),path.join(ROOT,'src/cli.ts'),'search','bread','--provider','dunnes-ie','--json'],{encoding:'utf8',env:{...process.env},timeout:10000});
+    assert.notEqual(result.status,0);
+    assert.match(result.stderr,/store-scoped/);
+    assert.equal(result.stdout.includes('"products"'),false);
+  } finally {
+    if(previous===undefined) delete process.env.DUNNES_IE_STORE_ID;
+    else process.env.DUNNES_IE_STORE_ID=previous;
+  }
 });
 
 test('dunnes: concurrent configured-store searches share one in-flight validation', async () => {
