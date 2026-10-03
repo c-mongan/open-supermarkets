@@ -536,13 +536,13 @@ export class TescoIrelandProvider implements GroceryProvider {
         'User-Agent': this.userAgent,
       },
     });
-    const text = await responseText(response);
     if (!response.ok) {
       throw new ProviderHttpError(
         'Tesco Ireland search index',
         response.status
       );
     }
+    const text = await responseText(response);
 
     let decoded: unknown;
     try {
@@ -649,31 +649,19 @@ export class TescoIrelandProvider implements GroceryProvider {
       headers,
       body: JSON.stringify(operations),
     });
-    const text = await responseText(response);
-
-    if (response.status === 403 && /invalid client/i.test(text)) {
-      throw new Error(
-        'Tesco Ireland rejected the public web API key (HTTP 403 Invalid Client). ' +
-          'The key rotates; set SUPERMARKET_TESCO_IE_API_KEY from a current tesco.ie request.'
-      );
-    }
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(
-        `Tesco Ireland xapi rejected the read request (HTTP ${response.status}). ` +
-          'Anonymous catalogue access is unavailable; check the retailer response before retrying.'
-      );
-    }
-    if (response.status === 429) {
-      throw new Error(
-        'Tesco Ireland rate limited the request (HTTP 429). Stop and retry later.'
-      );
-    }
+    // A failed body can be unreadable; the known HTTP status remains authoritative.
+    // Do not consume error payloads or allow their transport failure to mask it.
     if (!response.ok) {
-      throw new ProviderHttpError(
-        'Tesco Ireland',
-        response.status
-      );
+      const error = new ProviderHttpError('Tesco Ireland', response.status);
+      if (response.status === 401 || response.status === 403) {
+        error.message += '. Anonymous catalogue access is unavailable. ' +
+          'The public web API key rotates; check SUPERMARKET_TESCO_IE_API_KEY before retrying.';
+      } else if (response.status === 429) {
+        error.message += '. Tesco Ireland rate limited the request (HTTP 429). Stop and retry later.';
+      }
+      throw error;
     }
+    const text = await responseText(response);
 
     let decoded: unknown;
     try {

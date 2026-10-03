@@ -826,6 +826,27 @@ test('tesco: adding Ireland search preserves Lidl as the country default', () =>
   assert.equal(providersFor('IE','search')[0].id,'lidl-ie');
 });
 
+test('tesco: unreadable failed bodies preserve HTTP status without body reads or fallback', async () => {
+  const {ProviderHttpError}=require('../dist/providers/ie/shared');
+  for(const strategy of ['auto','index']) {
+    for(const status of [401,403,429,500]) {
+      let requests=0,bodyReads=0;
+      const provider=new TescoIrelandProvider({strategy,fetcher:async()=>{
+        requests++;
+        return {ok:false,status,text:async()=>{bodyReads++;throw new Error('unreadable error body');}};
+      }});
+      await assert.rejects(()=>provider.search('milk'),error=>{
+        assert.ok(error instanceof ProviderHttpError);
+        assert.equal(error.status,status);
+        assert.match(error.message,new RegExp(`HTTP ${status}`));
+        return true;
+      });
+      assert.equal(requests,1);
+      assert.equal(bodyReads,0);
+    }
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
