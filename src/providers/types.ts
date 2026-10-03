@@ -66,6 +66,46 @@ export interface SearchOptions {
   limit?: number;
   offset?: number;
   category?: string;
+  /**
+   * Retailer store id for this one search. Routes call `selectStore()` first on
+   * a request-local provider instance; store-scoped providers may also validate
+   * it here. Providers without the `stores` capability never receive it.
+   */
+  storeId?: string;
+}
+
+/** A retailer store used to scope local pricing, availability, and search. */
+export interface Store {
+  /** Retailer-owned identifier. This is deliberately not the gateway UUID. */
+  store_id: string;
+  name: string;
+  status?: string;
+  currency?: string;
+  postcode?: string;
+  address?: string;
+  location?: {
+    latitude: number;
+    longitude: number;
+  };
+  /** Normalized lowercase values, for example `pickup` and `delivery`. */
+  shopping_modes?: string[];
+}
+
+/** Optional filters for a read-only store lookup. */
+export interface StoreSearchOptions {
+  limit?: number;
+  offset?: number;
+  /** Validates the gateway response against this retailer-owned identifier. */
+  retailerStoreId?: string;
+  latitude?: number;
+  longitude?: number;
+  /** Nearby search radius in kilometres. Defaults to 10. */
+  range?: number;
+  shoppingMode?: 'pickup' | 'delivery';
+  /** Retailer text search, where supported. */
+  fullTextSearch?: string;
+  /** Retailer postcode filter, where supported. */
+  postcode?: string;
 }
 
 /**
@@ -78,6 +118,7 @@ export interface SearchOptions {
  */
 export type Capability =
   | 'search'    // product search + lookup. No account for most providers.
+  | 'stores'    // read-only store lookup and selection for local pricing.
   | 'basket'    // add/remove/read a basket. Needs an account.
   | 'slots'     // delivery slot availability. Needs an account.
   | 'checkout'  // place a real order. Needs account + address + payment.
@@ -136,6 +177,10 @@ export interface GroceryProvider {
   getProduct?(productId: string): Promise<Product>;
   getCategories?(): Promise<any>;
 
+  // ── stores (declared by the `stores` capability) ─────────────────────
+  listStores?(options?: StoreSearchOptions): Promise<Store[]>;
+  selectStore?(storeId: string): Promise<void>;
+
   // ── auth ─────────────────────────────────────────────────────────────
   login?(email: string, password: string): Promise<void>;
   logout?(): Promise<void>;
@@ -165,5 +210,10 @@ export interface GroceryProvider {
  * capability guard on every call. New code should prefer `GroceryProvider` plus
  * `assertCapability()`, which is honest about the fact that most providers in
  * the world do not do checkout.
+ *
+ * Store lookup/selection stays optional: full-service providers are not
+ * store-scoped, and routes guard those methods with the `stores` capability.
  */
-export type FullGroceryProvider = Required<GroceryProvider>;
+export type FullGroceryProvider =
+  Required<Omit<GroceryProvider, 'listStores' | 'selectStore'>> &
+  Pick<GroceryProvider, 'listStores' | 'selectStore'>;

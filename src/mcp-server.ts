@@ -14,10 +14,17 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { ProviderFactory, ProviderName, compareProduct } from './providers/index.js';
-import { createProvider } from './providers/registry.js';
+import { createProvider, getManifest, list as listManifests } from './providers/registry.js';
 import type { FullGroceryProvider } from './providers/types.js';
 import { money } from './format.js';
 import { explain } from './errors.js';
+import {
+  assertStoresSupported,
+  listProviderStores,
+  parseStoreSearchOptions,
+  prepareStoreId,
+  selectStoreForSearch,
+} from './stores.js';
 import * as fs from 'fs';
 import * as os from 'os';
 
@@ -46,8 +53,27 @@ const SESSION_PATHS: Record<ProviderName, string> = {
 /** Providers whose catalogue search works with no session at all. */
 const ANONYMOUS_SEARCH = new Set<ProviderName>(['tesco-hu', 'lidl-ie']);
 
+/** Registry providers with the `stores` capability, read live from the manifests. */
+function storeProviderIds(): string[] {
+  return listManifests({ capability: 'stores' }).map((m) => m.id);
+}
+
+/**
+ * The manifest determines whether catalogue search needs an account.
+ */
+function searchesAnonymously(provider: string): boolean {
+  if (ANONYMOUS_SEARCH.has(provider as ProviderName)) return true;
+  try {
+    const m = getManifest(provider);
+    return m.auth === 'none' || m.auth === 'anonymous';
+  } catch {
+    return false;
+  }
+}
+
 function isLoggedIn(provider: ProviderName): boolean {
-  return fs.existsSync(SESSION_PATHS[provider]);
+  const sessionPath = SESSION_PATHS[provider];
+  return sessionPath !== undefined && fs.existsSync(sessionPath);
 }
 
 function requireLogin(provider: ProviderName): string | null {
@@ -71,7 +97,22 @@ function textResult(text: string, isError = false) {
 // ─── Tool definitions ────────────────────────────────────────────
 
 const providerEnum = { type: 'string', enum: PROVIDERS, description: 'Supermarket provider: sainsburys, ocado, tesco, or tesco-hu (Hungary)' };
-const searchProviderEnum = { type: 'string', enum: [...PROVIDERS, 'lidl-ie'], description: 'Search provider, including Lidl Ireland (search only)' };
+function searchProviderEnum() {
+  const ids = listManifests({ capability: 'search' }).map((m) => m.id);
+  return { type: 'string', enum: ids, description: 'Search provider, including Lidl Ireland (search only)' };
+}
+
+function storeProviderEnum() {
+  const ids = storeProviderIds();
+  return ids.length
+    ? { type: 'string', enum: ids, description: 'Provider with the "stores" capability' }
+    : { type: 'string', description: 'Provider with the "stores" capability (none registered yet)' };
+}
+
+const storeIdProperty = {
+  type: 'string',
+  description: 'Retailer store id from grocery_stores. Only for providers with the "stores" capability.',
+};
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
@@ -103,11 +144,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
-            provider: { ...searchProviderEnum, default: 'sainsburys' },
+            provider: { ...searchProviderEnum(), default: 'sainsburys' },
             query: { type: 'string', description: 'Search term (e.g., "milk", "organic eggs", "chicken breast")' },
             limit: { type: 'number', description: 'Maximum results to return (default: 10)', default: 10 },
+            store_id: storeIdProperty,
           },
           required: ['query'],
+        },
+      },
+      {
+        name: 'grocery_stores',
+        description:
+          'Find retailer stores for providers that price and stock per store. Read-only. ' +
+          'Pass a returned store_id to grocery_search or grocery_search_batch.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            provider: storeProviderEnum(),
+            query: { type: 'string', description: 'Retailer text search, where supported' },
+            postcode: { type: 'string', description: 'Retailer postcode filter, where supported' },
+            latitude: { type: 'number', description: 'Latitude for a nearby search (with longitude)' },
+            longitude: { type: 'number', description: 'Longitude for a nearby search (with latitude)' },
+            range: { type: 'number', description: 'Nearby search radius in kilometres' },
+            shopping_mode: { type: 'string', enum: ['pickup', 'delivery'] },
+            limit: { type: 'number', description: 'Maximum stores to return (default: 10)', default: 10 },
+          },
+          required: ['provider'],
         },
       },
       {
@@ -132,7 +194,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: 'object',
           properties: {
-            provider: { ...searchProviderEnum, default: 'sainsburys' },
+            provider: { ...searchProviderEnum(), default: 'sainsburys' },
+            store_id: {
+              ...storeIdProperty,
+              description: `${storeIdProperty.description} Selected once before the batch and used for every query.`,
+            },
             queries: {
               type: 'array',
               items: { type: 'string' },
@@ -390,12 +456,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_compare ──
     if (name === 'grocery_search_batch') {
-      const { queries = [], limit = 5 } = args as { queries?: string[]; limit?: number };
+      const { queries = [], limit = 5, store_id } =
+        args as { queries?: string[]; limit?: number; store_id?: unknown };
       if (!queries.length) return textResult('Give me at least one query.', true);
+      const storeId = prepareStoreId(providerName, store_id);
       const { batchSearch } = await import('./batch.js');
       const provider = await createProvider(providerName);
-      const results = await batchSearch(provider, queries, { limit });
-      return textResult(JSON.stringify({ provider: providerName, results }, null, 2));
+      if (!storeId) {
+        const results = await batchSearch(provider, queries, { limit });
+        return textResult(JSON.stringify({ provider: providerName, results }, null, 2));
+      }
+      // Select once on this call's own instance before any concurrent query runs.
+      await selectStoreForSearch(providerName, provider, storeId);
+      const results = await batchSearch(provider, queries, { limit, storeId });
+      return textResult(JSON.stringify({ provider: providerName, store_id: storeId, results }, null, 2));
+    }
+
+    if (name === 'grocery_stores') {
+      const a = args as Record<string, unknown>;
+      const options = parseStoreSearchOptions({
+        query: a.query,
+        postcode: a.postcode,
+        latitude: a.latitude,
+        longitude: a.longitude,
+        range: a.range,
+        mode: a.shopping_mode,
+        limit: a.limit,
+      });
+      assertStoresSupported(providerName);
+      const provider = await createProvider(providerName);
+      const stores = await listProviderStores(providerName, provider, options);
+      return textResult(JSON.stringify({ provider: providerName, stores }, null, 2));
     }
 
     if (name === 'grocery_basket_add_batch') {
@@ -433,15 +524,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     // All remaining tools require login
-    const loginError = ANONYMOUS_SEARCH.has(providerName) ? null : requireLogin(providerName);
+    const loginError = searchesAnonymously(providerName) ? null : requireLogin(providerName);
 
     // ── grocery_search ──
     if (name === 'grocery_search') {
       // Search can sometimes work without login for some providers, but check anyway
-      if (loginError && !ANONYMOUS_SEARCH.has(providerName)) return textResult(loginError, true);
-      const { query, limit = 10 } = args as { query: string; limit?: number };
+      if (loginError) return textResult(loginError, true);
+      const { query, limit = 10, store_id } =
+        args as { query: string; limit?: number; store_id?: unknown };
+      const storeId = prepareStoreId(providerName, store_id);
       const provider = await createProvider(providerName);
-      const results = await provider.search(query, { limit });
+      if (storeId) await selectStoreForSearch(providerName, provider, storeId);
+      const results = await provider.search(query, storeId ? { limit, storeId } : { limit });
       const limited = results.slice(0, limit);
 
       const formatted = limited.map((p, i) => {
@@ -451,7 +545,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }).join('\n\n');
 
       return textResult(
-        `Found ${results.length} products at ${providerName} (showing ${limited.length}):\n\n${formatted}`
+        `Found ${results.length} products at ${providerName}${storeId ? ` store ${storeId}` : ''} (showing ${limited.length}):\n\n${formatted}`
       );
     }
 
