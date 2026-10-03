@@ -83,7 +83,7 @@ test('tesco: xapi search is read-only and tagged as the PLP micro-frontend', asy
   assert.doesNotMatch(operation.query, /mutation/i);
 });
 
-test('tesco: xapi maps price, unit price, size, promotion, image, and EUR', async () => {
+test('tesco: xapi maps regular price, unit price, size, image, and EUR', async () => {
   const provider = new TescoIrelandProvider({
     strategy: 'xapi',
     fetcher: queueFetch([jsonFixture('tesco-xapi-search.json')]),
@@ -93,7 +93,7 @@ test('tesco: xapi maps price, unit price, size, promotion, image, and EUR', asyn
   assert.equal(product.retail_price.price, 2.35);
   assert.deepEqual(product.unit_price, { price: 1.18, measure: 'litre' });
   assert.equal(product.size, '2 L');
-  assert.equal(product.description, 'Clubcard Price');
+  assert.equal(product.description, undefined);
   assert.equal(product.currency, 'EUR');
 });
 
@@ -844,6 +844,19 @@ test('tesco: unreadable failed bodies preserve HTTP status without body reads or
       assert.equal(requests,1);
       assert.equal(bodyReads,0);
     }
+  }
+});
+
+test('tesco: loyalty metadata never labels regular prices and product text stays intact', async () => {
+  for(const description of [undefined,'Fresh Irish milk from local farms']) {
+    const node=jsonFixture('tesco-xapi-search.json')[0].data.search.results[0].node;
+    node.description=description;
+    node.promotions=[{description:'Clubcard Price',price:{afterDiscount:2,beforeDiscount:2.35}}];
+    const provider=new TescoIrelandProvider({strategy:'xapi',fetcher:queueFetch([[{data:{search:{results:[{node}]}}}]])});
+    const [product]=await provider.search('milk');
+    assert.equal(product.retail_price.price,2.35);
+    assert.equal(product.description,description);
+    assert.ok(!JSON.stringify(product).includes('Clubcard Price'));
   }
 });
 

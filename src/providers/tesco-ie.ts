@@ -19,7 +19,6 @@ import { randomUUID as uuid } from 'node:crypto';
 import type { GroceryProvider, Product, SearchOptions } from './types';
 import {
   asRecord,
-  asRecords,
   clampLimit,
   clampOffset,
   explicitBooleanState,
@@ -190,10 +189,6 @@ function seller(node: Record<string, unknown>): Record<string, unknown> {
   return asRecord(sellers.results[0]);
 }
 
-function promotionFrom(value: unknown): Record<string, unknown> | undefined {
-  return asRecords(value)[0];
-}
-
 function firstFieldString(label: string, ...values: unknown[]): string | undefined {
   const texts = values.filter(value => value !== undefined && value !== null).map(value => {
     const text = firstString(value);
@@ -255,8 +250,6 @@ function mapProduct(node: Record<string, unknown>): Product | undefined {
   const price = productPrice(node);
   const unit = unitPrice(node);
   if (!id || !title || price === undefined) return undefined;
-  const firstSeller = seller(node);
-  const promotion = promotionFrom(firstSeller.promotions) ?? promotionFrom(node.promotions);
   const availability = asRecord(node.availability);
   const stockSignals = [
     parsedStockState(availability.status),
@@ -268,7 +261,8 @@ function mapProduct(node: Record<string, unknown>): Product | undefined {
   return {
     product_uid: id,
     name: title,
-    description: firstString(promotion?.description),
+    // A loyalty promotion describes a conditional offer, not this regular price.
+    description: firstString(node.description),
     retail_price: { price },
     unit_price: unit,
     // isForSale and a positive price prove sale eligibility, not inventory.
