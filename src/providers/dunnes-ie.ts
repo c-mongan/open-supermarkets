@@ -170,7 +170,7 @@ function storeMatches(store: Store, fullTextSearch?: string, postcode?: string):
     const haystack = normalizedSearchText(
       [store.name, store.address, store.postcode].filter(Boolean).join(' ')
     );
-    if (!haystack.includes(query)) return false;
+    if (!query.split(' ').every(token => haystack.includes(token))) return false;
   }
   if (postcode) {
     const expected = normalizedSearchText(postcode).replace(/ /g, '');
@@ -453,7 +453,6 @@ export class DunnesIrelandProvider implements GroceryProvider {
     url.searchParams.set('q', normalizedQuery);
     url.searchParams.set('take', String(limit));
     url.searchParams.set('skip', String(offset));
-    url.searchParams.set('page', String(Math.floor(offset / limit) + 1));
 
     const payload = await jsonResponse<unknown>(
       await this.fetcher(url, {

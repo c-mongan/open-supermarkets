@@ -302,6 +302,8 @@ test('dunnes: gateway mode sends store, correlation, and shopping-mode context',
   const url = new URL(calls[1].url);
   assert.equal(url.pathname, '/api/stores/258/search');
   assert.equal(url.searchParams.get('skip'), '8');
+  assert.equal(url.searchParams.get('take'), '4');
+  assert.equal(url.searchParams.has('page'), false);
   assert.ok(calls[1].init.headers['x-correlation-id']);
   assert.ok(calls[1].init.headers['x-shopping-mode']);
 });
@@ -470,6 +472,23 @@ test('dunnes: rejects string prices that overflow to Infinity', async () => {
     {items:[{sku:'1',name:'Bread',price:'9'.repeat(400)}]}
   ])});
   await assert.rejects(() => p.search('bread'), /no valid products/);
+});
+
+test('dunnes: store text tokens can match across name and address fields', async () => {
+  const p=new DunnesIrelandProvider({fetcher:queueFetch([jsonFixture('dunnes-stores.json')])});
+  assert.deepEqual((await p.listStores({fullTextSearch:'Beacon Dublin'})).map(store=>store.store_id),['258']);
+});
+
+test('dunnes: non-page-aligned search offsets use only absolute skip', async () => {
+  const calls=[];
+  const p=new DunnesIrelandProvider({storeId:'258',fetcher:queueFetch([
+    jsonFixture('dunnes-stores.json'),jsonFixture('dunnes-gateway.json')
+  ],calls)});
+  await p.search('bread',{limit:3,offset:1});
+  const url=new URL(calls[1].url);
+  assert.equal(url.searchParams.get('skip'),'1');
+  assert.equal(url.searchParams.get('take'),'3');
+  assert.equal(url.searchParams.has('page'),false);
 });
 
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });
