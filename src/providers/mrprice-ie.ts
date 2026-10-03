@@ -108,6 +108,11 @@ function extractAttribute(tag: string, attribute: string): string | undefined {
   return undefined;
 }
 
+function hasAttribute(tag: string, name: string): boolean {
+  return [...tag.matchAll(/(?:^|\s)([^\s"'=<>`]+)(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+))?/g)]
+    .some(match => match[1]!.toLowerCase() === name);
+}
+
 function hasClass(tag: string, name: string): boolean {
   return (extractAttribute(tag, 'class') ?? '').split(/\s+/).includes(name);
 }
@@ -200,7 +205,7 @@ function visibleSearchHtml(html: string): string {
   for (const marker of [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)].reverse()) {
     const tag = marker[0];
     const style = extractAttribute(tag, 'style') ?? '';
-    if (!/\shidden(?:\s|=|>)/i.test(tag) && extractAttribute(tag, 'aria-hidden') !== 'true' &&
+    if (!hasAttribute(tag, 'hidden') && extractAttribute(tag, 'aria-hidden') !== 'true' &&
       !/(?:display\s*:\s*none|visibility\s*:\s*hidden)/i.test(style)) continue;
     if (/^(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)$/i.test(marker[1]!)) continue;
     const content = elementContent(html, marker, 'hidden element');

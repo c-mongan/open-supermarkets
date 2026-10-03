@@ -450,6 +450,12 @@ test('mrprice: matches escaped query attributes without changing spaces or decod
   }
 });
 
+test('mrprice: hidden word in a quoted title is not a hidden attribute', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a title="Find hidden gems 1L" href="/products/item">Item</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.name,'Find hidden gems 1L');
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
