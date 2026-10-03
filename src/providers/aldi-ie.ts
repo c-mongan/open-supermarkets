@@ -105,7 +105,7 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
 
 function normalizedStoreId(value: unknown): string {
   const storeId = firstString(value)?.toUpperCase();
-  if (!storeId) throw new ProviderInputError('storeId must be a non-empty string');
+  if (!storeId) throw new ProviderInputError('Aldi Ireland', 'storeId must be a non-empty string');
   return storeId;
 }
 
@@ -196,15 +196,15 @@ function storeLookupOptions(options: StoreSearchOptions): {
   longitude?: number;
 } {
   if (options.range !== undefined) {
-    throw new ProviderInputError('Aldi store lookup does not support a range filter');
+    throw new ProviderInputError('Aldi Ireland', 'Aldi store lookup does not support a range filter');
   }
   if (options.shoppingMode !== undefined) {
-    throw new ProviderInputError(
+    throw new ProviderInputError('Aldi Ireland', 
       'Aldi Ireland exposes walk-in service points only; pickup and delivery filters are unsupported'
     );
   }
   if (options.retailerStoreId !== undefined) {
-    throw new ProviderInputError(
+    throw new ProviderInputError('Aldi Ireland', 
       'Aldi store lookup does not support retailerStoreId filtering; use selectStore for validated selection'
     );
   }
@@ -216,14 +216,14 @@ function storeLookupOptions(options: StoreSearchOptions): {
   const postcode = options.postcode === undefined ? undefined : requireQuery(options.postcode);
   const coordinatesSpecified = options.latitude !== undefined || options.longitude !== undefined;
   if (fullTextSearch && postcode) {
-    throw new ProviderInputError('fullTextSearch cannot be combined with postcode');
+    throw new ProviderInputError('Aldi Ireland', 'fullTextSearch cannot be combined with postcode');
   }
   if (postcode && coordinatesSpecified) {
-    throw new ProviderInputError('postcode cannot be combined with coordinates');
+    throw new ProviderInputError('Aldi Ireland', 'postcode cannot be combined with coordinates');
   }
   if (!coordinatesSpecified) return { limit, offset, fullTextSearch, postcode };
   if (fullTextSearch) {
-    throw new ProviderInputError('fullTextSearch cannot be combined with coordinates');
+    throw new ProviderInputError('Aldi Ireland', 'fullTextSearch cannot be combined with coordinates');
   }
   if (
     options.latitude === undefined ||
@@ -233,7 +233,7 @@ function storeLookupOptions(options: StoreSearchOptions): {
     options.latitude < -90 || options.latitude > 90 ||
     options.longitude < -180 || options.longitude > 180
   ) {
-    throw new ProviderInputError('latitude and longitude must be valid coordinates');
+    throw new ProviderInputError('Aldi Ireland', 'latitude and longitude must be valid coordinates');
   }
   return { limit, offset, postcode, latitude: options.latitude, longitude: options.longitude };
 }
@@ -260,7 +260,7 @@ export class AldiIrelandProvider implements GroceryProvider {
   async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
     const normalizedQuery = requireQuery(query);
     if (options.category !== undefined) {
-      throw new ProviderInputError('Aldi Ireland search does not support category filtering');
+      throw new ProviderInputError('Aldi Ireland', 'Aldi Ireland search does not support category filtering');
     }
     const limit = clampLimit(options.limit, 10, 60);
     const offset = clampOffset(options.offset);
@@ -269,7 +269,7 @@ export class AldiIrelandProvider implements GroceryProvider {
       ? undefined
       : await this.validatedStoreId(requestedStoreId);
     if (!storeId) {
-      throw new ProviderInputError(
+      throw new ProviderInputError('Aldi Ireland', 
         'Aldi Ireland requires a store id. Pass --store-id or set SUPERMARKET_ALDI_IE_STORE_ID.'
       );
     }
@@ -373,7 +373,7 @@ export class AldiIrelandProvider implements GroceryProvider {
       }
       if (stores.length < STORE_LOOKUP_MAX) break;
     }
-    throw new ProviderInputError(`Aldi Ireland service point ${selectedStoreId} was not found`);
+    throw new ProviderInputError('Aldi Ireland', `Aldi Ireland service point ${selectedStoreId} was not found`);
   }
 
 }
