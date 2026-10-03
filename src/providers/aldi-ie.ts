@@ -101,7 +101,7 @@ function retailPrice(item: Record<string, unknown>): number | undefined {
 
   // Both amountRelevant and amount are integer minor units in the live API.
   const minorUnits = firstNumber(price.amountRelevant, price.amount);
-  return minorUnits !== undefined && Number.isInteger(minorUnits)
+  return minorUnits !== undefined && Number.isSafeInteger(minorUnits)
     ? minorUnits / 100
     : undefined;
 }
@@ -384,14 +384,18 @@ export class AldiIrelandProvider implements GroceryProvider {
     const reportedPageSize = firstNumber(pagination.limit);
     const pageSize = reportedPageSize ?? selection.limit;
     const totalCount = firstNumber(pagination.totalCount);
-    if ((pagination.limit !== undefined && reportedPageSize === undefined) ||
+    const reportedOffset = firstNumber(pagination.offset);
+    const rawCount = (source as unknown[]).length;
+    if ((pagination.offset !== undefined && (reportedOffset === undefined ||
+          !Number.isSafeInteger(reportedOffset) || reportedOffset !== selection.offset)) ||
+        (pagination.limit !== undefined && reportedPageSize === undefined) ||
         (pagination.totalCount !== undefined && totalCount === undefined) ||
         !Number.isInteger(pageSize) || pageSize < 1 || pageSize > selection.limit ||
-        (source as unknown[]).length > pageSize ||
-        (totalCount !== undefined && (!Number.isInteger(totalCount) || totalCount < 0))) {
+        rawCount > pageSize ||
+        (totalCount !== undefined && (!Number.isSafeInteger(totalCount) || totalCount < selection.offset + rawCount))) {
       throw new ProviderProtocolError('Aldi Ireland stores', 'invalid store pagination metadata');
     }
-    return { stores, invalidStoreIds, rawCount: (source as unknown[]).length, pageSize, totalCount };
+    return { stores, invalidStoreIds, rawCount, pageSize, totalCount };
   }
 
   private async requestJson(url: URL, init: RequestInit, provider: string, timeoutMs = this.requestTimeoutMs): Promise<unknown> {

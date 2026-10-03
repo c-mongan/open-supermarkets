@@ -7,7 +7,7 @@ open-supermarkets stores --provider aldi-ie --query Dublin --limit 2
 open-supermarkets search milk --provider aldi-ie --store-id D041 --limit 3
 ```
 
-The provider supports limit and offset. Store lookup supports text, postcode, or a coordinate pair. These filters cannot be combined. Range, shopping mode, retailerStoreId and product category filters are unsupported. Basket, authentication and checkout operations are unsupported.
+The provider supports limit and offset. Store lookup supports text, postcode, or a coordinate pair. These filters cannot be combined. Range, shopping mode, retailerStoreId and product category filters are unsupported. Basket, authentication and checkout operations are unsupported. Country comparison does not route a store selection to Aldi. Use explicit `aldi-ie` search with `--store-id`; country comparison is unsupported for this provider.
 
 Search returns EUR prices and retailer SKU identifiers. Only the verified primary API is used; errors do not trigger another host. Numeric display fields are ignored; valid integer amount fields are interpreted as cents. Authentication, rate limit, server and malformed-response errors are exposed. Each request, including its body, has a 20-second deadline. Store selection has a 30-second total deadline and a 100-page safety bound. Invalid retailer coordinates are omitted.
 

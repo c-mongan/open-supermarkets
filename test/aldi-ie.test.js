@@ -7,6 +7,7 @@ const storeFixture = (limit, offset = 0) => {
   const data = jsonFixture('aldi-stores.json');
   data.meta.pagination.limit = limit;
   data.meta.pagination.offset = offset;
+  data.meta.pagination.totalCount += offset;
   return data;
 };
 const { AldiIrelandProvider } = require('../src/providers/aldi-ie.ts');
@@ -559,6 +560,26 @@ test('aldi: numeric display fields cannot become major-unit prices', async () =>
     const q=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'no-minor',name:'Milk',price:{[field]:139}}]}])});
     await rejects(()=>q.search('milk'),/no valid products/);
   }
+});
+
+test('aldi: unsafe minor-unit amounts cannot become invented prices', async () => {
+  for(const field of ['amountRelevant','amount']) {
+    for(const amount of [9007199254740993, '9007199254740993']) {
+      const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'unsafe',name:'Milk',price:{[field]:amount}}]}])});
+      await rejects(()=>p.search('milk'),/no valid products/);
+    }
+  }
+});
+
+test('aldi: contradictory store offsets and totals fail protocol validation', async () => {
+  for(const pagination of [{offset:1},{offset:'unknown'},{offset:1.5},{totalCount:0},{totalCount:9007199254740993}]) {
+    const p=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store'}],meta:{pagination}}])});
+    await rejects(()=>p.listStores(),/invalid store pagination metadata/);
+  }
+  const q=new AldiIrelandProvider({fetcher:queueFetch([{data:[{id:'D001',name:'Store'}],meta:{pagination:{offset:2,totalCount:2}}}])});
+  await rejects(()=>q.listStores({offset:2}),/invalid store pagination metadata/);
+  const empty=new AldiIrelandProvider({fetcher:queueFetch([{data:[],meta:{pagination:{offset:0,totalCount:0}}}])});
+  assert.deepEqual(await empty.listStores(),[]);
 });
 
 async function main() {
