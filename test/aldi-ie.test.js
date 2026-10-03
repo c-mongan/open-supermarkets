@@ -446,6 +446,23 @@ test('aldi: brand prefix requires a complete word', async () => {
   assert.deepEqual((await p.search('apples')).map(p=>p.name),['Max Maximum Apples','Max Apples']);
 });
 
+test('aldi: explicit foreign prices cannot be labelled EUR', async () => {
+  for(const price of [
+    {amountRelevantDisplay:'£1.39',amountRelevant:139},
+    {amountRelevantDisplay:'GBP 1.39',amountRelevant:139},
+    {amountRelevantDisplay:'GBP1.39',amountRelevant:139},
+    {amountRelevant:'USD139'},
+    {amountRelevantDisplay:'$1.39',amountRelevant:139},
+    {amountRelevantDisplay:'1.39 USD',amountRelevant:139},
+    {currencyCode:'USD',amountRelevant:139}
+  ]) {
+    const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'foreign',name:'Milk',price}]}])});
+    await rejects(()=>p.search('milk'),/no valid products/);
+  }
+  const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'euro',name:'Milk',price:{currencyCode:'EUR',amountRelevantDisplay:'€1.39'}}]}])});
+  assert.equal((await p.search('milk'))[0].currency,'EUR');
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

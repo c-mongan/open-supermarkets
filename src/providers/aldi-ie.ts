@@ -93,6 +93,11 @@ function imageUrl(item: Record<string, unknown>): string | undefined {
 
 function retailPrice(item: Record<string, unknown>): number | undefined {
   const price = asRecord(item.price);
+  const currency = firstString(price.currencyCode, price.currency, item.currency);
+  if (currency && currency.toUpperCase() !== 'EUR') return undefined;
+  if ([price.amountRelevantDisplay, price.amountDisplay, price.amountRelevant, price.amount].some((value) =>
+    typeof value === 'string' && /[£$]|GBP|USD/i.test(value)
+  )) return undefined;
   // The live Aldi response includes both an integer minor-unit amount and a
   // display value. Prefer the display value because it is already in EUR.
   const display = firstNumber(price.amountRelevantDisplay, price.amountDisplay);
