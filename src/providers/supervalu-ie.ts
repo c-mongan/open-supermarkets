@@ -433,6 +433,7 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       const root = asRecord(payload);
       const source = field(root, 'items');
       const rows = requireRecordArray(source, 'SuperValu Ireland stores', 'items collection');
+      const sourceCount = Array.isArray(source) ? source.length : 0;
       const pageStores = rows
         .map(gatewayStore)
         .filter((store): store is Store => store !== undefined);
@@ -477,14 +478,14 @@ export class SuperValuIrelandProvider implements GroceryProvider {
           }
           seenStoreIds.add(store.store_id);
         }
-        const received = skip + rows.length;
+        const received = skip + sourceCount;
         if (received > expectedTotal!) {
           throw new ProviderProtocolError(
             'SuperValu Ireland stores',
             'pagination total is smaller than received records'
           );
         }
-        if (rows.length === 0 && received < expectedTotal!) {
+        if (sourceCount === 0 && received < expectedTotal!) {
           throw new ProviderProtocolError(
             'SuperValu Ireland stores',
             'pagination ended before the declared total'
@@ -494,12 +495,12 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       if (
         !localFilter ||
         selection.latitude !== undefined ||
-        rows.length === 0 ||
-        skip + rows.length >= expectedTotal!
+        sourceCount === 0 ||
+        skip + sourceCount >= expectedTotal!
       ) {
         break;
       }
-      skip += rows.length;
+      skip += sourceCount;
     }
 
     if (

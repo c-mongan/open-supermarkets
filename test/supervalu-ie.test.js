@@ -511,6 +511,16 @@ test('supervalu: full text terms can match separate store fields', async () => {
   assert.deepEqual((await provider.listStores({fullTextSearch:'Killester Dublin'})).map(store => store.store_id), ['A']);
 });
 
+test('supervalu: store pagination counts malformed source entries for its cursor', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([
+    {total:3,items:[{retailerStoreId:'A',name:'Cork'},null]},
+    {total:3,items:[{retailerStoreId:'B',name:'Dublin'}]}
+  ], calls)});
+  assert.deepEqual((await provider.listStores({fullTextSearch:'Dublin'})).map(store => store.store_id), ['B']);
+  assert.equal(new URL(calls[1].url).searchParams.get('Skip'), '2');
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);
