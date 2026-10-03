@@ -2,7 +2,7 @@
 
 Anonymous grocery search uses the grocery gateway. Select a retailer store ID
 before search. Prices and stock apply to that store in delivery mode. An explicit non-EUR
-currency or pickup-only store is rejected. The public Dunnes general
+currency, missing currency/mode metadata, or pickup-only store is rejected. The public Dunnes general
 retail VTEX catalogue is not used.
 
 After build, run:
@@ -32,6 +32,14 @@ Search `bread` returned Brennans Family Pan Premium White Bread 800g
 510g (`100162301`) at EUR 2.19. Both had explicit `available: true`. Offset 2
 returned different products. A nonsense query returned a valid empty collection.
 An invalid store ID was rejected.
+
+The gateway mode IDs were checked with a live negative control. Edenderry
+(`339`) reported only `Pickup`. Within 1 km of 53.34277545, -7.058441444,
+`shoppingModeId=11111111-1111-1111-1111-111111111111` returned Edenderry.
+`shoppingModeId=22222222-2222-2222-2222-222222222222` excluded it. Both IDs
+returned Beacon Court, which supports pickup and delivery. A random UUID
+(`12345678-1111-1111-1111-111111111111`) returned no stores. These are recognised
+gateway identifiers, despite their repeated digits.
 
 Offline fixtures use fake product IDs and URLs. Tests cover store filters,
 pagination limits and failures, selected store isolation, input validation,

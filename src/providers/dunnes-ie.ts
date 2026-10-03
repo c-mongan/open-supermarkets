@@ -41,6 +41,8 @@ const STORE_LOOKUP_LIMIT = 20;
 const STORE_LOOKUP_MAX = 100;
 const MAX_STORE_PAGES = 10;
 const DEFAULT_NEARBY_RANGE_KM = 10;
+// These gateway IDs are real: pickup-only store 339 is returned for 111…
+// and excluded for 222…; a random UUID returns no stores. See provider docs.
 const SHOPPING_MODE_IDS = {
   pickup: '11111111-1111-1111-1111-111111111111',
   delivery: '22222222-2222-2222-2222-222222222222',
