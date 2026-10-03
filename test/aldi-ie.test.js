@@ -474,6 +474,20 @@ test('aldi: explicit foreign prices cannot be labelled EUR', async () => {
   }
 });
 
+test('aldi: product-level foreign currency overrides cannot be labelled EUR', async () => {
+  for (const price of [{amountRelevant:139},{currencyCode:'EUR',amountRelevant:139}]) {
+    const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{sku:'foreign',name:'Milk',currencyCode:'USD',price}]}])});
+    await rejects(()=>p.search('milk'),/no valid products/);
+  }
+});
+
+test('aldi: unrelated id fields cannot replace a missing retailer SKU', async () => {
+  for (const identity of [{id:'unverified-id'},{productId:'unverified-product-id'}]) {
+    const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[{...identity,name:'Milk',price:{amountRelevant:139}}]}])});
+    await rejects(()=>p.search('milk'),/no valid products/);
+  }
+});
+
 async function main() {
   let passed = 0;
   const failures = [];

@@ -93,7 +93,7 @@ function imageUrl(item: Record<string, unknown>): string | undefined {
 
 function retailPrice(item: Record<string, unknown>): number | undefined {
   const price = asRecord(item.price);
-  const currencies = [price.currencyCode, price.currency, item.currency];
+  const currencies = [price.currencyCode, price.currency, item.currencyCode, item.currency];
   if (currencies.some((value) => {
     const currency = asString(value);
     return currency !== undefined && currency.toUpperCase() !== 'EUR';
@@ -115,7 +115,7 @@ function retailPrice(item: Record<string, unknown>): number | undefined {
 }
 
 function mapProduct(item: Record<string, unknown>): Product | undefined {
-  const sku = firstString(item.sku, item.productId, item.id);
+  const sku = firstString(item.sku);
   const amount = retailPrice(item);
   const price = asRecord(item.price);
   const comparison = firstString(price.comparisonDisplay, item.comparisonDisplay);
