@@ -9,7 +9,6 @@ import {
   asRecord,
   clampLimit,
   clampOffset,
-  compactSnippet,
   firstString,
   type FetchLike,
   jsonResponse,
@@ -250,11 +249,9 @@ export class MrPriceIrelandProvider implements GroceryProvider {
         return predictive.slice(offset, offset + limit);
       }
     } else if (![404, 410].includes(suggestionResponse.status)) {
-      const body = await responseText(suggestionResponse);
       throw new ProviderHttpError(
         'Mr Price Ireland',
-        suggestionResponse.status,
-        compactSnippet(body)
+        suggestionResponse.status
       );
     }
 
@@ -268,7 +265,7 @@ export class MrPriceIrelandProvider implements GroceryProvider {
     });
     const html = await responseText(response);
     if (!response.ok) {
-      throw new ProviderHttpError('Mr Price Ireland', response.status, compactSnippet(html));
+      throw new ProviderHttpError('Mr Price Ireland', response.status);
     }
     return parseHtmlProducts(html, this.baseUrl, limit, offset);
   }
