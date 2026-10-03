@@ -570,6 +570,27 @@ test('supervalu: store pagination has an overall deadline', async () => {
   assert.ok(requests <= 2);
 });
 
+test('supervalu: filtered lookup stops once its requested slice is complete', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({fetcher:queueFetch([{total:1000,items:[{retailerStoreId:'A',name:'Dublin'}]}], calls)});
+  assert.deepEqual((await provider.listStores({fullTextSearch:'Dublin',limit:1})).map(store=>store.store_id), ['A']);
+  assert.equal(calls.length, 1);
+});
+
+test('supervalu: repeated explicit search override reuses validated store without changing default', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({storeId:'A',fetcher:queueFetch([
+    {items:[{retailerStoreId:'B',name:'B'}]},jsonFixture('supervalu-gateway.json'),jsonFixture('supervalu-gateway.json'),
+    {items:[{retailerStoreId:'A',name:'A'}]},jsonFixture('supervalu-gateway.json')
+  ], calls)});
+  await provider.search('milk',{storeId:'B'});
+  await provider.search('milk',{storeId:'B'});
+  await provider.search('milk');
+  assert.deepEqual(calls.filter(call => new URL(call.url).pathname.endsWith('/search')).map(call=>new URL(call.url).pathname), [
+    '/api/stores/B/search','/api/stores/B/search','/api/stores/A/search'
+  ]);
+});
+
 (async () => {
   for (const {name, fn} of tests) { await fn(); console.log(`ok - ${name}`); }
   console.log(`${tests.length} SuperValu tests passed`);

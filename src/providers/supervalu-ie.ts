@@ -295,7 +295,7 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
 export class SuperValuIrelandProvider implements GroceryProvider {
   readonly name = 'supervalu-ie';
   private storeId?: string;
-  private verifiedStoreId?: string;
+  private readonly verifiedStoreIds = new Set<string>();
   private readonly requestTimeoutMs: number;
   private readonly storeLookupTimeoutMs: number;
   private readonly cookieHeader?: string;
@@ -330,9 +330,9 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const limit = clampLimit(options.limit, 10, 50);
     const offset = clampOffset(options.offset);
     const selectedStoreId = normalizedStoreId(requestedStoreId);
-    if (this.verifiedStoreId !== selectedStoreId) {
+    if (!this.verifiedStoreIds.has(selectedStoreId)) {
       await this.validateSelectedStore(selectedStoreId);
-      if (this.storeId === selectedStoreId) this.verifiedStoreId = selectedStoreId;
+      this.verifiedStoreIds.add(selectedStoreId);
     }
     const url = new URL(
       `${this.gatewayBase.replace(/\/$/, '')}/stores/${encodeURIComponent(selectedStoreId)}/search`
@@ -500,7 +500,12 @@ export class SuperValuIrelandProvider implements GroceryProvider {
           );
         }
       }
+      const matchingCount = stores.filter(store =>
+        (!selection.retailerStoreId || store.store_id === selection.retailerStoreId) &&
+        storeMatches(store, selection.fullTextSearch, selection.postcode)
+      ).length;
       if (
+        (localFilter && matchingCount >= selection.offset + selection.limit) ||
         !localFilter ||
         selection.latitude !== undefined ||
         sourceCount === 0 ||
@@ -564,6 +569,6 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     const selectedStoreId = normalizedStoreId(storeId);
     await this.validateSelectedStore(selectedStoreId);
     this.storeId = selectedStoreId;
-    this.verifiedStoreId = selectedStoreId;
+    this.verifiedStoreIds.add(selectedStoreId);
   }
 }
