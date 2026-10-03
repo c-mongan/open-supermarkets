@@ -110,11 +110,11 @@ test('mrprice: rejects pagination before requests', async () => {
   assert.equal(calls.length,0);
 });
 
-test('mrprice: falls back to the full HTML grid when predictive search is empty', async () => {
+test('mrprice: falls back to the full HTML grid when predictive route is unavailable', async () => {
   const calls = [];
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
-      { resources: { results: { products: [] } } },
+      {body:'missing',status:404},
       fixture('mrprice-search.html'),
     ], calls),
   });
@@ -127,7 +127,7 @@ test('mrprice: falls back to the full HTML grid when predictive search is empty'
 test('mrprice: HTML fallback detects stock and expands image templates', async () => {
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
-      { resources: { results: { products: [] } } },
+      {body:'missing',status:404},
       fixture('mrprice-search.html'),
     ]),
   });
@@ -141,7 +141,7 @@ test('mrprice: HTML fallback detects stock and expands image templates', async (
 test('mrprice: rejects a challenge page that lacks the search results grid', async () => {
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
-      { resources: { results: { products: [] } } },
+      {body:'missing',status:404},
       '<!doctype html><html><body>CAPTCHA challenge</body></html>',
     ]),
   });
@@ -152,7 +152,7 @@ test('mrprice: rejects a challenge page that lacks the search results grid', asy
 test('mrprice: accepts retailer no-results state without a search grid', async () => {
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
-      { resources: { results: { products: [] } } },
+      {body:'missing',status:404},
       '<main id="MainContent"><form class="search-form" action="/search"><input name="q" value="missing-product"></form><div class="collection-nomatch-text"><p>No results found</p></div></main>',
     ]),
   });
@@ -169,7 +169,7 @@ test('mrprice: ignores recommendation cards outside the search results grid', as
       '<a href="/products/search-result">Search Result</a></div>';
   const provider = new MrPriceIrelandProvider({
     fetcher: queueFetch([
-      { resources: { results: { products: [] } } },
+      {body:'missing',status:404},
       `${recommendation}<div id="js-product-ajax">${result}</div>${recommendation}`,
     ]),
   });
@@ -238,7 +238,7 @@ test('mrprice: caps predictive requests at ten suggestions', async () => {
   const provider=new MrPriceIrelandProvider({fetcher:queueFetch([jsonFixture('mrprice-predictive.json'),fixture('mrprice-search.html')], calls)});
   await provider.search('milk',{limit:20});
   assert.equal(new URL(calls[0].url).searchParams.get('resources[limit]'),'10');
-  assert.equal(calls.length,2);
+  assert.equal(calls.length,1);
 });
 
 test('mrprice: converts HTML sub-euro cents and rejects broken grids', async () => {
@@ -270,11 +270,11 @@ test('mrprice: manifest declares only community anonymous Ireland search', async
 });
 
 
-test('mrprice: short predictive windows use full-search fallback', async () => {
+test('mrprice: valid short predictive windows return suggestions without HTML', async () => {
   const calls=[];
   const provider=new MrPriceIrelandProvider({fetcher:queueFetch([jsonFixture('mrprice-predictive.json'),fixture('mrprice-search.html')],calls)});
-  assert.equal((await provider.search('milk',{limit:3}))[0].name,'Oat Milk 1L');
-  assert.equal(calls.length,2);
+  assert.equal((await provider.search('milk',{limit:3}))[0].name,'Avonmore Fresh Milk 1L');
+  assert.equal(calls.length,1);
 });
 
 test('mrprice: incomplete HTML windows with later pages are rejected', async () => {
@@ -358,8 +358,8 @@ test('mrprice: resolves query-relative pagination against search path', async ()
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2}), /further pages are unsupported/);
 });
 
-test('mrprice: surfaces fallback errors after short predictive response', async () => {
-  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([jsonFixture('mrprice-predictive.json'),{body:'limited',status:429}])});
+test('mrprice: surfaces required fallback errors after missing predictive route', async () => {
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},{body:'limited',status:429}])});
   await rejects(() => provider.search('milk',{limit:10}), /HTTP 429/);
 });
 
@@ -374,7 +374,7 @@ test('mrprice: rejects product links outside configured storefront', async () =>
 
 test('mrprice: preserves failed HTML status without reading broken body', async () => {
   let bodyRead=false;
-  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([{resources:{results:{products:[]}}},()=>({ok:false,status:429,async text(){bodyRead=true;throw new Error('broken body')}})])});
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},()=>({ok:false,status:429,async text(){bodyRead=true;throw new Error('broken body')}})])});
   await assert.rejects(() => provider.search('milk'), error => error.name==='ProviderHttpError' && error.status===429);
   assert.equal(bodyRead,false);
 });
@@ -466,6 +466,25 @@ test('mrprice: caps default24 and explicit20 at ten without a forced HTML reques
     assert.equal(new URL(calls[0].url).searchParams.get('resources[limit]'),'10');
     assert.deepEqual(products.map(p=>p.product_uid),payload.resources.results.products.map(p=>`https://www.mrprice.online${p.url}`));
   }
+});
+
+test('mrprice: default milk suggestions do not call or hide an unnecessary HTML fallback', async () => {
+  const payload=jsonFixture('mrprice-predictive.json');
+  payload.resources.results.products.push({title:'Unmarked Milk 1L',price:'1.29',url:'/products/unmarked-milk-1l'});
+  for(const options of [{},{limit:24},{limit:20}]) {
+    const calls=[];
+    const fetcher=queueFetch([payload,{body:'limited',status:429}],calls);
+    assert.equal((await new MrPriceIrelandProvider({fetcher}).search('milk',options)).length,3);
+    assert.equal(calls.length,1);
+    assert.equal(fetcher.remaining(),1);
+  }
+});
+
+test('mrprice: genuine empty predictive results return empty without fallback', async () => {
+  const calls=[];
+  const provider=new MrPriceIrelandProvider({fetcher:queueFetch([{resources:{results:{products:[]}}}],calls)});
+  assert.deepEqual(await provider.search('missing'),[]);
+  assert.equal(calls.length,1);
 });
 
 async function main() {

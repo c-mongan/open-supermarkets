@@ -333,12 +333,11 @@ export class MrPriceIrelandProvider implements GroceryProvider {
     if (offset !== 0) {
       throw new ProviderInputError('Mr Price Ireland', 'pagination is unsupported; offset must be zero');
     }
-    const predictiveLimit = Math.min(offset + limit, 10);
 
     const suggestionUrl = new URL('/search/suggest.json', this.baseUrl);
     suggestionUrl.searchParams.set('q', normalizedQuery);
     suggestionUrl.searchParams.set('resources[type]', 'product');
-    suggestionUrl.searchParams.set('resources[limit]', String(predictiveLimit));
+    suggestionUrl.searchParams.set('resources[limit]', String(limit));
 
     const suggestionResponse = await this.fetcher(suggestionUrl, {
       headers: { Accept: 'application/json' },
@@ -348,10 +347,9 @@ export class MrPriceIrelandProvider implements GroceryProvider {
     if (suggestionResponse.ok) {
       const payload = await jsonResponse<unknown>(suggestionResponse, 'Mr Price Ireland');
       const predictive = predictiveProducts(payload, this.baseUrl);
-      const predictiveWindowFitsCap = offset <= 10 - limit;
-      if (predictive.length >= offset + limit && predictiveWindowFitsCap) {
-        return predictive.slice(offset, offset + limit);
-      }
+      // Predictive search returns up to the requested number of suggestions.
+      // A short or empty valid response does not require the full catalogue.
+      return predictive.slice(0, limit);
     } else if (![404, 410].includes(suggestionResponse.status)) {
       throw new ProviderHttpError(
         'Mr Price Ireland',
@@ -359,7 +357,7 @@ export class MrPriceIrelandProvider implements GroceryProvider {
       );
     }
 
-    // Shopify's predictive endpoint is narrower than its full search page.
+    // Fall back only when the predictive route is unavailable (404/410).
     const htmlUrl = new URL('/search', this.baseUrl);
     htmlUrl.searchParams.set('type', 'product');
     htmlUrl.searchParams.set('q', normalizedQuery);
