@@ -162,6 +162,7 @@ checkout needs an account, address and payment method, so it exists for fewer.
 | Sainsbury's | 🇬🇧 | ✓ | ✓ | ✓ | ✓ | email + password |
 | Ocado | 🇬🇧 | ✓ | ✓ | read-only | — | email + password |
 | Lidl Ireland | 🇮🇪 | ✓ | — | — | — | none |
+| [SuperValu Ireland](docs/providers/supervalu-ie.md) | 🇮🇪 | ✓; store lookup and explicit selection | — | — | — | none |
 | Albert Heijn | 🇳🇱 | ✓ | — | — | — | **none** |
 | Albert Heijn België | 🇧🇪 | ✓ | — | — | — | **none** |
 | Mercadona | 🇪🇸 | ✓ | — | — | — | **none** |
