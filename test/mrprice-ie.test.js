@@ -278,7 +278,7 @@ test('mrprice: short predictive windows use full-search fallback', async () => {
 });
 
 test('mrprice: incomplete HTML windows with later pages are rejected', async () => {
-  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div><a href="/search?page=2&amp;q=milk">Next</a></div>';
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div><div class="AjaxinatePagination"><a href="/search?page=2&amp;q=milk">Next</a></div></div>';
   for(const options of [{offset:0,limit:3}]) {
     await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',options), /further pages are unsupported/);
   }
@@ -298,12 +298,12 @@ test('mrprice: rejects fractional HTML cents', async () => {
 
 
 test('mrprice: recognizes escaped pagination outside the result grid', async () => {
-  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=milk&amp;page=2">Next</a>';
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><div class="AjaxinatePagination"><a href="/search?q=milk&amp;page=2">Next</a></div>';
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2}), /further pages are unsupported/);
 });
 
 test('mrprice: ignores pagination for unrelated searches', async () => {
-  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=bread&amp;page=2">Next bread</a>';
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><div class="AjaxinatePagination"><a href="/search?q=bread&amp;page=2">Next bread</a></div>';
   assert.equal((await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2})).length,1);
 });
 
@@ -354,7 +354,7 @@ test('mrprice: canonical identity removes collection scope and fragment', async 
 
 
 test('mrprice: resolves query-relative pagination against search path', async () => {
-  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="?q=milk&amp;page=2">Next</a>';
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><div class="AjaxinatePagination"><a href="?q=milk&amp;page=2">Next</a></div>';
   await rejects(() => new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2}), /further pages are unsupported/);
 });
 
@@ -388,6 +388,19 @@ test('mrprice: async registry loads search-only provider without full-service fa
   assert.equal(typeof provider.search,'function');
   assert.equal(provider.getBasket,undefined);
   assert.throws(() => ProviderFactory.create('mrprice-ie'), /await createProvider/);
+});
+
+
+test('mrprice: chooses visible product name after an untitled image link', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item"><img src="/item.jpg"></a><a href="/products/item">Item 1L</a></div></div>';
+  const [product]=await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('item',{limit:1});
+  assert.equal(product.name,'Item 1L');
+  assert.equal(product.product_uid,'https://www.mrprice.online/products/item');
+});
+
+test('mrprice: ignores unrelated same-query page links outside pager controls', async () => {
+  const html='<div id="js-product-ajax"><div class="product-card" data-price="199"><a href="/products/item">Item</a></div></div><a href="/search?q=milk&amp;page=2">Related milk</a>';
+  assert.equal((await new MrPriceIrelandProvider({fetcher:queueFetch([{body:'missing',status:404},html])}).search('milk',{limit:2})).length,1);
 });
 
 async function main() {

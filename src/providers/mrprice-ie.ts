@@ -107,21 +107,18 @@ function hasClass(tag: string, name: string): boolean {
 
 function mapHtmlCard(card: string, baseUrl: string): Product | undefined {
   const anchors = [...card.matchAll(/<a\b[^>]*>/gi)]
-    .filter(match => extractAttribute(match[0], 'href')?.includes('/products/'));
-  const anchorMatch = anchors.find(match => extractAttribute(match[0], 'title')) ?? anchors[0];
-  const anchor = anchorMatch?.[0];
-  const anchorStart = anchorMatch?.index;
-  if (!anchor || anchorStart === undefined) return undefined;
-  const href = extractAttribute(anchor, 'href');
-  const url = canonicalProductUrl(baseUrl, href);
-  if (!url) return undefined;
-
-  const title = extractAttribute(anchor, 'title');
-  const anchorClose = card.toLowerCase().indexOf('</a>', anchorStart + anchor.length);
-  const anchorText =
-    anchorClose >= 0 ? htmlText(card.slice(anchorStart + anchor.length, anchorClose)) : '';
-  const name = (title ? htmlText(title) : '') || anchorText;
-  if (!name) return undefined;
+    .filter(match => canonicalProductUrl(baseUrl, extractAttribute(match[0], 'href')));
+  const named = anchors.map(match => {
+    const start = match.index! + match[0].length;
+    const close = card.toLowerCase().indexOf('</a>', start);
+    const title = extractAttribute(match[0], 'title');
+    const name = (title ? htmlText(title) : '') ||
+      (close >= 0 ? htmlText(card.slice(start, close)) : '');
+    return { match, name };
+  }).find(row => row.name);
+  if (!named) return undefined;
+  const url = canonicalProductUrl(baseUrl, extractAttribute(named.match[0], 'href'))!;
+  const name = named.name;
 
   const openTag = [...card.matchAll(/<[^>]+>/g)].find(match => hasClass(match[0], 'product-card'))?.[0] ?? '';
   const cents = extractAttribute(openTag, 'data-price');
@@ -162,6 +159,11 @@ function extractSearchGrid(html: string): string {
     );
   }
 
+  return elementContent(html, marker, 'search results grid');
+}
+
+function elementContent(html: string, marker: RegExpMatchArray, label: string): string {
+  if (marker.index === undefined) throw new ProviderProtocolError('Mr Price Ireland', `missing ${label}`);
   const tagName = marker[1]!;
   const contentStart = marker.index + marker[0].length;
   const tags = new RegExp(`<\\/?${tagName}\\b[^>]*>`, 'gi');
@@ -181,7 +183,7 @@ function extractSearchGrid(html: string): string {
 
   throw new ProviderProtocolError(
     'Mr Price Ireland',
-    'HTML search results grid was not closed'
+    `HTML ${label} was not closed`
   );
 }
 
@@ -208,7 +210,11 @@ function parseHtmlProducts(
       'HTML product-card collection contained no valid products'
     );
   }
-  const hasNextPage = [...html.matchAll(/<a\b[^>]*>/gi)].some(match => {
+  const pagerHtml = [...html.matchAll(/<([a-z][\w:-]*)\b[^>]*>/gi)]
+    .filter(match => hasClass(match[0], 'AjaxinatePagination'))
+    .map(marker => elementContent(html, marker, 'pagination control'))
+    .join('\n');
+  const hasNextPage = [...pagerHtml.matchAll(/<a\b[^>]*>/gi)].some(match => {
     const href = extractAttribute(match[0], 'href');
     if (!href) return false;
     try {
