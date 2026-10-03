@@ -799,6 +799,16 @@ test('tesco: xapi rejects pages outside GraphQL Int before any request', async (
   assert.equal(JSON.parse(calls[0].init.body)[0].variables.page,2147483647);
 });
 
+test('tesco: search-only provider loads through async registry, not full-service factory', async () => {
+  const {getManifest,createProvider,ProviderFactory}=require('../dist/providers');
+  assert.deepEqual(getManifest('tesco-ie').capabilities,['search']);
+  const provider=await createProvider('tesco-ie');
+  assert.equal(typeof provider.search,'function');
+  assert.equal(typeof provider.getProduct,'function');
+  assert.equal(provider.getBasket,undefined);
+  assert.throws(()=>ProviderFactory.create('tesco-ie'),/no synchronous constructor/);
+});
+
 async function main() {
   let passed = 0;
   const failures = [];
