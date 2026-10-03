@@ -36,8 +36,6 @@ export class ProviderFactory {
         return new (require('./ah').AlbertHeijnBEProvider)();
       case 'mercadona':
         return new (require('./mercadona').MercadonaProvider)();
-      case 'dunnes-ie':
-        return new (require('./dunnes-ie').DunnesIrelandProvider)();
       case 'ahorramas':
         return new (require('./ahorramas').AhorramasProvider)();
       case 'tesco-hu':

@@ -499,4 +499,49 @@ test('dunnes: filtered pagination and nearby windows do not claim store nonexist
   }
 });
 
+test('dunnes: registration exposes the tested provider capabilities and constructors', async () => {
+  const {getManifest,createProvider}=require('../src/providers/registry');
+  const {ProviderFactory}=require('../src/providers');
+  const manifest=getManifest('dunnes-ie');
+  assert.equal(manifest.country,'IE');
+  assert.equal(manifest.auth,'none');
+  assert.equal(manifest.tier,'community');
+  assert.equal(manifest.maintainer,'c-mongan');
+  assert.deepEqual(manifest.capabilities,['search','stores']);
+  assert.ok(await createProvider('dunnes-ie') instanceof DunnesIrelandProvider);
+  assert.throws(()=>ProviderFactory.create('dunnes-ie'),/no synchronous constructor/);
+});
+
+test('dunnes: concurrent configured-store searches share one in-flight validation', async () => {
+  let finishValidation;
+  const calls=[];
+  const p=new DunnesIrelandProvider({storeId:'258',fetcher:async input=>{
+    const url=new URL(input);calls.push(url.pathname);
+    if(url.pathname==='/api/stores') {
+      return new Promise(resolve=>{finishValidation=()=>resolve(response(jsonFixture('dunnes-stores.json')))});
+    }
+    return response(jsonFixture('dunnes-gateway.json'));
+  }});
+  const searches=Promise.all([p.search('bread'),p.search('milk')]);
+  await Promise.resolve();
+  assert.deepEqual(calls,['/api/stores']);
+  finishValidation();
+  const results=await searches;
+  assert.equal(results.length,2);
+  assert.equal(calls.filter(path=>path==='/api/stores').length,1);
+  assert.equal(calls.filter(path=>path==='/api/stores/258/search').length,2);
+});
+
+test('dunnes: failed shared validation rejects all searches and a later search can retry', async () => {
+  const calls=[];
+  const p=new DunnesIrelandProvider({storeId:'258',fetcher:queueFetch([
+    {body:'rate limited',status:429},jsonFixture('dunnes-stores.json'),jsonFixture('dunnes-gateway.json')
+  ],calls)});
+  const results=await Promise.allSettled([p.search('bread'),p.search('milk')]);
+  assert.ok(results.every(result=>result.status==='rejected' && /HTTP 429/.test(result.reason.message)));
+  assert.equal(calls.length,1);
+  assert.equal((await p.search('bread')).length,1);
+  assert.equal(calls.length,3);
+});
+
 (async () => { for (const {name, fn} of tests) { await fn(); console.log('PASS', name); } })().catch(error => { console.error(error); process.exitCode = 1; });

@@ -258,6 +258,7 @@ export class DunnesIrelandProvider implements GroceryProvider {
   private readonly fetcher: FetchLike;
   private storeId?: string;
   private validatedStoreId?: string;
+  private readonly storeValidations = new Map<string, Promise<void>>();
   private readonly cookieHeader?: string;
   private readonly gatewayBase: string;
 
@@ -403,6 +404,21 @@ export class DunnesIrelandProvider implements GroceryProvider {
   }
 
   private async validateStore(storeId: string): Promise<void> {
+    let validation = this.storeValidations.get(storeId);
+    if (!validation) {
+      validation = Promise.resolve().then(() => this.checkStore(storeId));
+      this.storeValidations.set(storeId, validation);
+    }
+    try {
+      await validation;
+    } finally {
+      if (this.storeValidations.get(storeId) === validation) {
+        this.storeValidations.delete(storeId);
+      }
+    }
+  }
+
+  private async checkStore(storeId: string): Promise<void> {
     const [store] = await this.listStores({ retailerStoreId: storeId, limit: 1 });
     if (!store) {
       throw new ProviderInputError('Dunnes Ireland', `retailer store ${storeId} was not found`);
