@@ -79,7 +79,12 @@ async function helpers(): Promise<void> {
       { mode: 'drone' },
       { limit: '0' },
       { limit: '2.5' },
+      { limit: '2.0' },
       { limit: '2junk' },
+      { limit: '0x10' },
+      { limit: '1e2' },
+      { latitude: '0x10', longitude: '0' },
+      { range: '1e2' },
       { latitude: '53junk', longitude: '-6' },
       { range: '2junk' },
       { query: '  ' },
@@ -233,6 +238,17 @@ async function httpRoutes(): Promise<void> {
       assert.equal(events.searches.length, 0);
     });
 
+    await test('HTTP search limits reject malformed numeric input before store selection', async () => {
+      const before = loadCount('fake-stores');
+      for (const limit of ['', '2.0', '2.5', '2junk', '0x10', '1e2', '9007199254740992']) {
+        const r = await get(port, `/search?provider=fake-stores&q=milk&store_id=s1&limit=${encodeURIComponent(limit)}`);
+        assert.equal(r.status, 400, JSON.stringify(r.body));
+      }
+      assert.equal(loadCount('fake-stores'), before);
+      assert.equal(events.selects.length, 0);
+      assert.equal(events.searches.length, 0);
+    });
+
     await test('unsupported operations are 501 before any provider code or network', async () => {
       await offline(async () => {
         for (const route of [
@@ -282,6 +298,7 @@ async function mcpRoutes(): Promise<void> {
       const byName = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema as any]));
       assert.deepEqual(byName.grocery_stores.properties.provider.enum,
         PROVIDERS.filter((p) => p.capabilities.includes('stores')).map((p) => p.id));
+      assert.equal(byName.grocery_stores.properties.store_id.type, 'string');
       assert.equal(byName.grocery_stores.properties.limit.type, 'integer');
       assert.equal(byName.grocery_stores.properties.limit.minimum, 1);
       assert.equal(byName.grocery_search.properties.store_id.type, 'string');
@@ -294,6 +311,7 @@ async function mcpRoutes(): Promise<void> {
 
     await test('grocery_providers discovers registry providers without loading their code', async () => {
       const before = FAKE_IDS.map(loadCount);
+      const realBefore = realLoads();
       const r = await call('grocery_providers', {});
       assert.equal(r.isError, false, r.text);
       for (const manifest of PROVIDERS) {
@@ -301,15 +319,16 @@ async function mcpRoutes(): Promise<void> {
       }
       assert.match(r.text, /fake-stores: no login required; auth: none; capabilities: search, stores/);
       assert.deepEqual(FAKE_IDS.map(loadCount), before);
+      assert.equal(realLoads(), realBefore);
       assert.equal(events.selects.length, 0);
       assert.equal(fakes.fetchCalls, 0);
     });
 
     await test('grocery_stores maps arguments onto StoreSearchOptions', async () => {
-      const r = await call('grocery_stores', { provider: 'fake-stores', query: 'dub', shopping_mode: 'pickup', limit: 2, latitude: 53.3, longitude: -6.2 });
+      const r = await call('grocery_stores', { provider: 'fake-stores', query: 'dub', shopping_mode: 'pickup', store_id: 's2', limit: 2, latitude: 53.3, longitude: -6.2 });
       assert.equal(r.isError, false, r.text);
       assert.deepEqual(JSON.parse(r.text).stores.map((s: any) => s.store_id), ['s1', 's2']);
-      assert.deepEqual(events.listStores[0], { limit: 2, fullTextSearch: 'dub', latitude: 53.3, longitude: -6.2, shoppingMode: 'pickup' });
+      assert.deepEqual(events.listStores[0], { limit: 2, fullTextSearch: 'dub', latitude: 53.3, longitude: -6.2, shoppingMode: 'pickup', retailerStoreId: 's2' });
     });
 
     await test('grocery_search with store_id selects then searches', async () => {
@@ -378,6 +397,15 @@ async function mcpRoutes(): Promise<void> {
         searchManifest.auth = originalSearchAuth;
         ctor.prototype.listStores = originalList;
       }
+    });
+
+    await test('Ocado MCP booking fails before auth and provider loading', async () => {
+      const before = loadCount('ocado');
+      const r = await call('grocery_book_slot', { provider: 'ocado', slot_id: '1' });
+      assert.equal(r.isError, true, r.text);
+      assert.match(r.text, /does not support slot booking/);
+      assert.equal(loadCount('ocado'), before);
+      assert.equal(fakes.fetchCalls, 0);
     });
 
     await test('invalid MCP search queries fail before store selection or provider work', async () => {
@@ -541,7 +569,7 @@ async function cliRoutes(): Promise<void> {
       [['search', '--batch', '-'], '[null]'],
       [['search', '--batch', '-'], '[{"query":5}]'],
       [['search', '--batch', '-'], '{bad-json}'],
-      ...['2.5', '2junk', '0', '-1'].map((limit) => [['search', 'milk', '--limit', limit], undefined]),
+      ...['2.0', '2.5', '2junk', '0', '-1', '1e2', '0x10', '9007199254740992'].map((limit) => [['search', 'milk', '--limit', limit], undefined]),
       ...['storeId', 'store_id'].flatMap((key) => ['s2', null, ''].map((id) => [
         ['search', '--batch', '-'], JSON.stringify([{ query: 'milk', [key]: id }]),
       ])),
@@ -560,8 +588,9 @@ async function cliRoutes(): Promise<void> {
 
   await test('CLI store numeric inputs reject partial and fractional integer values before loading', () => {
     for (const args of [
-      ['--limit', '2junk'], ['--limit', '2.5'],
+      ['--limit', '2junk'], ['--limit', '2.0'], ['--limit', '2.5'], ['--limit', '1e2'], ['--limit', '0x10'],
       ['--latitude', '53junk', '--longitude', '-6'], ['--range', '2junk'],
+      ['--latitude', '0x10', '--longitude', '-6'], ['--range', '1e2'],
     ]) {
       const r = runCli(['--provider', 'fake-stores', 'stores', ...args]);
       assert.equal(r.status, 1, r.stderr);

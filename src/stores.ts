@@ -163,8 +163,9 @@ function optionalText(value: unknown, name: string): string | undefined {
 
 function optionalNumber(value: unknown, name: string): number | undefined {
   if (!present(value)) return undefined;
+  const grammar = name === 'limit' ? /^\d+$/ : /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/;
   const parsed =
-    typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+    typeof value === 'number' ? value : typeof value === 'string' && grammar.test(value.trim()) ? Number(value) : NaN;
   if (!Number.isFinite(parsed)) throw invalid(`${name} must be a finite number, got "${String(value)}"`);
   return parsed;
 }
@@ -196,7 +197,7 @@ export function parseStoreSearchOptions(
   }
 
   const limit = optionalNumber(input.limit, 'limit') ?? defaultLimit;
-  if (!Number.isInteger(limit) || limit < 1) {
+  if (!Number.isSafeInteger(limit) || limit < 1) {
     throw invalid(`limit must be a positive integer, got "${String(input.limit)}"`);
   }
 
