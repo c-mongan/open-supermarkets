@@ -444,15 +444,15 @@ export class AldiIrelandProvider implements GroceryProvider {
       }
       for (const store of stores) seen.add(store.store_id);
       const exhausted = totalCount === undefined
-        ? rawCount < pageSize
+        ? rawCount === 0
         : offset + rawCount >= totalCount;
       if (exhausted) {
         throw new ProviderInputError('Aldi Ireland', `service point ${selectedStoreId} was not found`);
       }
-      if (rawCount !== pageSize) {
+      if (totalCount !== undefined && rawCount !== pageSize) {
         throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned an incomplete page');
       }
-      offset += pageSize;
+      offset += totalCount === undefined ? rawCount : pageSize;
     }
     throw new ProviderProtocolError('Aldi Ireland stores', 'store validation exceeded the 100-page safety limit');
   }

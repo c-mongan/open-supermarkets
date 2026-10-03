@@ -426,6 +426,22 @@ test('aldi: retailer page caps advance by the advertised page size', async () =>
   await p.selectStore('D600');assert.equal(new URL(calls[1].url).searchParams.get('offset'),'2');
 });
 
+test('aldi: metadata-free capped store pages probe the next raw offset', async () => {
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([
+    {data:[{id:'D001',name:'First store'}]},
+    {data:[{id:'D600',name:'Later store'}]}
+  ],calls)});
+  await p.selectStore('D600');assert.equal(new URL(calls[1].url).searchParams.get('offset'),'1');
+});
+
+test('aldi: metadata-free store absence requires an empty page', async () => {
+  const calls=[];const p=new AldiIrelandProvider({fetcher:queueFetch([
+    {data:[{id:'D001',name:'First store'}]},{data:[]}
+  ],calls)});
+  await rejects(()=>p.selectStore('D999'),/D999 was not found/);
+  assert.equal(calls.length,2);assert.equal(new URL(calls[1].url).searchParams.get('offset'),'1');
+});
+
 test('aldi: unexpected unit price strings remain unknown', async () => {
   const p=new AldiIrelandProvider({storeId:'D001',fetcher:searchFetch([{data:[
     {sku:'promo',name:'Milk',price:{amountRelevant:139,comparisonDisplay:'Was €2.00, now €1.20/1 L'}},
