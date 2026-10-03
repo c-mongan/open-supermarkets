@@ -1,6 +1,6 @@
 # SuperValu Ireland
 
-Anonymous catalogue search uses the public SuperValu storefront gateway. Prices and availability belong to the selected retailer store. There is no default store or national price claim.
+Anonymous catalogue search uses the public SuperValu storefront gateway. Prices and availability belong to the selected retailer store. There is no default store or national price claim. Search uses the official delivery catalogue context for the selected store; it does not establish walk-in or pickup prices.
 
 Discover a store, then pass its retailer-owned ID with CLI `--store-id` or HTTP/MCP `store_id`. Store environment variables do not select a store. Direct callers can pass constructor `storeId`, call `selectStore`, or set search `storeId`; search validates the explicit selection before use.
 
@@ -9,9 +9,9 @@ supermarket stores --provider supervalu-ie --store-id 76
 supermarket search milk --provider supervalu-ie --store-id 76 --limit 2 --json
 ```
 
-Store lookup supports limits, offsets, text, postcode prefixes, and nearby coordinates. Nearby requests require both coordinates and reject exact store IDs, text/postcode filters, and offsets. Text/postcode lookup is bounded to ten remote pages. Requests have a ten-second fetch/body deadline. Store discovery has a thirty-second overall deadline. Category filters, basket, checkout, orders, and slots are unsupported.
+Store lookup supports limits, offsets, text, postcode prefixes, and nearby coordinates. Nearby requests require both coordinates and reject exact store IDs, text/postcode filters, and offsets. Text/postcode lookup is bounded to ten remote pages. Requests have a ten-second fetch/body deadline. Store discovery has a thirty-second overall deadline. Category filters, basket, checkout, orders, and slots are unsupported. Country-wide comparison cannot select a store and is unsupported; use explicit store search instead.
 
-Product IDs, EUR prices, size, and stock come from the retailer. Missing or conflicting stock is `null`. Malformed responses and HTTP errors are reported, not converted into empty results.
+Product IDs, EUR prices, size, and stock come from the retailer. Prices use the gateway current price. An explicit loyalty discount uses the retailer’s non-member price and unit price; missing non-member prices remain unknown. Quantity thresholds and promotion markdowns do not replace the single-item price. Missing or conflicting stock is `null`. Malformed responses and HTTP errors are reported, not converted into empty results.
 
 ## Verification
 

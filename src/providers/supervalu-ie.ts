@@ -82,7 +82,8 @@ function productPrice(...values: unknown[]): number | undefined {
 function mapProduct(item: Record<string, unknown>): Product | undefined {
   const name = firstString(item.name, item.title, item.productName);
   const id = firstString(item.id, item.productId, item.sku);
-  const price = productPrice(
+  const hasLoyaltyDiscount = item.hasLoyaltyDiscount === true;
+  const price = hasLoyaltyDiscount ? productPrice(item.subtotalWithoutLoyalty) : productPrice(
     item.priceNumeric,
     item.currentPrice,
     item.price,
@@ -96,7 +97,9 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     product_uid: id,
     name,
     retail_price: { price },
-    unit_price: parseUnitPrice(item.pricePerUnit) ?? parseUnitPrice(item.unitPrice) ?? parseUnitPrice(item.unitPriceText),
+    unit_price: hasLoyaltyDiscount
+      ? parseUnitPrice(item.unitPriceWithoutLoyalty)
+      : parseUnitPrice(item.pricePerUnit) ?? parseUnitPrice(item.unitPrice) ?? parseUnitPrice(item.unitPriceText),
     in_stock: explicitBooleanState(
       item.available,
       typeof item.outOfStock === 'boolean' ? !item.outOfStock : undefined
@@ -341,6 +344,8 @@ export class SuperValuIrelandProvider implements GroceryProvider {
       Origin: BASE_URL,
       Referer: `${BASE_URL}/`,
       'Accept-Language': 'en-IE,en;q=0.9',
+      'X-Site-Host': BASE_URL,
+      'X-Shopping-Mode': SHOPPING_MODE_IDS.delivery,
     };
     if (this.cookieHeader) headers.Cookie = this.cookieHeader;
 

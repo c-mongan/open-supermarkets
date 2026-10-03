@@ -341,6 +341,49 @@ test('supervalu: sends explicit store scope, offset, and optional cookie', async
   assert.equal(url.pathname, '/api/stores/5550/search');
   assert.equal(url.searchParams.get('skip'), '14');
   assert.equal(calls[1].init.headers.Cookie, 'cf_clearance=user-owned');
+  assert.equal(calls[1].init.headers['X-Site-Host'], 'https://shop.supervalu.ie');
+  assert.equal(calls[1].init.headers['X-Shopping-Mode'], '22222222-2222-2222-2222-222222222222');
+});
+
+test('supervalu: retains the current single-item price for conditional promotions', async () => {
+  const provider = new SuperValuIrelandProvider({
+    storeId: '5550',
+    fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
+      productId: '1015957003', name: 'Nescafé Gold Blend Coffee (95 g)',
+      priceNumeric: 5, price: '€5.00', wholePrice: 5,
+      tprPrice: [{ markdown: 5, active: true, label: 'Only €5' }],
+      promotions: [{ name: '3 for €10 Rewards Price', loyaltyBased: true, minimumQuantity: 3 }],
+    }] }]),
+  });
+  const [product] = await provider.search('coffee');
+  assert.equal(product.retail_price.price, 5);
+});
+
+test('supervalu: uses the explicit non-member price and unit price for rewards discounts', async () => {
+  const provider = new SuperValuIrelandProvider({
+    storeId: '5550',
+    fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
+      productId: '1014325007', name: 'Nescafé Gold Blend Coffee (190 g)',
+      priceNumeric: 8.75, price: '€8.75', wholePrice: 12.59,
+      pricePerUnit: '€46.05/kg', hasLoyaltyDiscount: true,
+      subtotalWithoutLoyalty: '€12.59', unitPriceWithoutLoyalty: '€66.26/kg',
+      promotions: [{ name: 'Rewards Price Only €8.75', loyaltyBased: true }],
+    }] }]),
+  });
+  const [product] = await provider.search('coffee');
+  assert.equal(product.retail_price.price, 12.59);
+  assert.deepEqual(product.unit_price, { price: 66.26, measure: 'kg' });
+});
+
+test('supervalu: does not guess a missing non-member rewards price', async () => {
+  const provider = new SuperValuIrelandProvider({
+    storeId: '5550',
+    fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
+      productId: 'rewards', name: 'Rewards Coffee', priceNumeric: 8.75,
+      wholePrice: 12.59, hasLoyaltyDiscount: true,
+    }] }]),
+  });
+  await rejects(() => provider.search('coffee'), /valid products/);
 });
 
 test('supervalu: maps price, unit price, promotion text, image, and size', async () => {
