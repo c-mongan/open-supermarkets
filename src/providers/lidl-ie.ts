@@ -11,7 +11,6 @@ import {
   clampLimit,
   clampOffset,
   explicitBooleanState,
-  firstNumber,
   firstString,
   type FetchLike,
   jsonResponse,
@@ -30,13 +29,41 @@ export interface LidlIrelandOptions {
   apiVersion?: string;
 }
 
+// Accept only complete, non-negative amounts. Stripping arbitrary text
+// can turn malformed values into a plausible shelf price.
+function firstPrice(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const text = typeof value === 'string' ? value.trim() : undefined;
+    const amount = typeof value === 'number' ? value
+      : text && /^(?:€\s*)?\d+(?:[.,]\d{1,2})?$/.test(text)
+        ? Number(text.replace(/^€\s*/, '').replace(',', '.')) : undefined;
+    if (amount !== undefined && Number.isFinite(amount) && amount >= 0) return amount;
+  }
+  return undefined;
+}
+
+function conditionalPrice(price: Record<string, unknown>): boolean {
+  const discount = asRecord(price.discount);
+  const text = firstString(discount.discountText) ?? '';
+  return discount.fromNormalPriceForLidlPlus === true ||
+    /mix\s*(?:['’]?n['’]?|and|&)\s*match|multi[- ]?buy|\bbuy\b|\d+\s+for\b|lidl\s*plus/i.test(text);
+}
+
+function regularOldPrice(price: Record<string, unknown>): number | undefined {
+  // A recommended retail price is not evidence of this retailer's price.
+  if (asRecord(price.discount).fromRecommendedPrice === true) return undefined;
+  return firstPrice(price.oldPrice);
+}
+
 function stockState(data: Record<string, unknown>): boolean | null {
   const availability = asRecord(data.stockAvailability);
   const badgeInfo = asRecord(availability.badgeInfo);
   const signals = asRecords(badgeInfo.badges).flatMap((badge) => {
-    const text = firstString(badge.text, badge.label) ?? '';
-    if (/sold out|out of stock|unavailable/i.test(text)) return [false];
-    if (/\bin stock\b/i.test(text)) return [true];
+    const text = (firstString(badge.text, badge.label) ?? '').trim();
+    // Match complete status labels. A sentence such as 'Not in stock' or
+    // 'Back in stock soon' must never become a positive stock signal.
+    if (/^(?:sold out|out of stock|unavailable|not in stock|no longer in stock)[.!]?$/i.test(text)) return [false];
+    if (/^in stock[.!]?$/i.test(text)) return [true];
     return [];
   });
   return explicitBooleanState(...signals);
@@ -58,19 +85,17 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
   const currentPrice = asRecord(regionPrice.currentPrice);
   const currentLidlPlusPrice = asRecord(regionPrice.currentLidlPlusPrice);
   const currentLidlPlusPriceDetails = asRecord(currentLidlPlusPrice.price);
-  // Lidl Plus is loyalty pricing. The common Product contract has no field
-  // for it, so only its oldPrice (the regular price shown beside the offer)
-  // may be used as a final fallback. Never map the loyalty price itself.
-  const productPrice = firstNumber(
-    price.price,
-    currentPrice.price,
-    currentLidlPlusPriceDetails.oldPrice
-  );
+  // Offer terms can appear only on the regional price while data.price
+  // repeats the discounted amount. A multibuy is not a single-item price.
+  const conditional = conditionalPrice(price) || conditionalPrice(currentPrice);
+  const productPrice = conditional
+    ? firstPrice(regularOldPrice(currentPrice), regularOldPrice(price))
+    : firstPrice(price.price, currentPrice.price, regularOldPrice(currentLidlPlusPriceDetails));
   const canonicalPath = firstString(data.canonicalUrl, data.url);
   const id = firstString(data.id, data.productId, data.code, canonicalPath);
   if (!id || productPrice === undefined) return undefined;
   const pricePerUnit = asRecord(data.pricePerUnit);
-  const unitPrice = firstNumber(pricePerUnit.price, data.basePrice);
+  const unitPrice = conditional ? undefined : firstPrice(pricePerUnit.price, data.basePrice);
   const unitMeasure = firstString(
     pricePerUnit.unit,
     pricePerUnit.unitOfMeasure,

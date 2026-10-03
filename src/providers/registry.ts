@@ -184,7 +184,6 @@ export const PROVIDERS: ProviderManifest[] = [
   },
 ];
 
-const byId = new Map(PROVIDERS.map((p) => [p.id, p]));
 
 export class UnknownProviderError extends Error {
   constructor(id: string, available: string[]) {
@@ -208,7 +207,9 @@ export class MissingCapabilityError extends Error {
 }
 
 export function getManifest(id: string): ProviderManifest {
-  const m = byId.get(id);
+  // Read the live list rather than a snapshot so offline tests can register a
+  // temporary fake manifest. A dozen entries makes a linear scan free.
+  const m = PROVIDERS.find((p) => p.id === id);
   if (!m) throw new UnknownProviderError(id, PROVIDERS.map((p) => p.id));
   return m;
 }

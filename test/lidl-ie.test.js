@@ -90,3 +90,74 @@ test('Lidl rejects blank searches before calling the retailer', async () => {
   await assert.rejects(() => provider.search('  '), /query must not be empty/);
   assert.equal(calls.length, 0);
 });
+
+test('Lidl maps the captured Mix n Match offer to its single-item price', async () => {
+  const payload = JSON.parse(readFileSync(join(__dirname, 'fixtures/lidl-multibuy.json'), 'utf8'));
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.product_uid, '/p/realforno-milk-and-honey-shortbread-biscuits/p11143576');
+  assert.equal(product.retail_price.price, 1.79);
+  assert.equal(product.unit_price, undefined);
+  assert.equal(product.in_stock, null);
+});
+
+test('Lidl rejects conditional pricing without a reliable single-item price', async () => {
+  for (const discountText of ["Mix 'n' Match 2 for €3", 'Buy 2 get 1 free', '3 for €5', 'Lidl Plus']) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'conditional', fullTitle: 'Milk', price: { price: 1.50 },
+      regionsPrices: { '1': { currentPrice: { price: 1.50, discount: { discountText } } } },
+    } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});
+
+test('Lidl retains unconditional reductions rather than mapping their old price', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'sale', fullTitle: 'Milk', price: { price: 1.50, oldPrice: 1.79 },
+    regionsPrices: { '1': { currentPrice: { price: 1.50, oldPrice: 1.79, discount: { discountText: '16% off' } } } },
+  } } }] };
+  const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(product.retail_price.price, 1.50);
+});
+
+test('Lidl rejects malformed and negative prices instead of stripping their text', async () => {
+  for (const amount of [-1, '-€1.50', '1.50oops', '2 for €3', 'Infinity', '', null]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'invalid', fullTitle: 'Milk', price: { price: amount },
+    } } }] };
+    await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+  }
+});
+
+test('Lidl does not treat a recommended price as the regular multibuy price', async () => {
+  const payload = { items: [{ gridbox: { data: {
+    id: 'rrp', fullTitle: 'Milk', price: { price: 1.50 },
+    regionsPrices: { '1': { currentPrice: {
+      price: 1.50, oldPrice: 2, discount: { discountText: '2 for €3', fromRecommendedPrice: true },
+    } } },
+  } } }] };
+  await assert.rejects(() => new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk'), /no valid products/);
+});
+
+test('Lidl retains valid rows when another row has an invalid price', async () => {
+  const payload = fixture();
+  payload.items.push({ gridbox: { data: { id: 'bad', fullTitle: 'Milk', price: { price: -1 } } } });
+  const products = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+  assert.equal(products.length, 2);
+  assert.equal(products[0].retail_price.price, 2.25);
+});
+
+test('Lidl matches complete stock labels without treating negation as available', async () => {
+  for (const [text, expected] of [
+    ['Not in stock', false], ['No longer in stock', false], ['Out of stock', false],
+    ['Sold out', false], ['Unavailable', false], ['IN STOCK', true],
+    ['In stock.', true], ['Back in stock soon', null], ['Not currently in stock', null],
+    ['Usually in stock', null], ['Not unavailable', null], ['Not sold out', null],
+  ]) {
+    const payload = { items: [{ gridbox: { data: {
+      id: 'stock', fullTitle: 'Milk', price: { price: 1.50 },
+      stockAvailability: { badgeInfo: { badges: [{ text }] } },
+    } } }] };
+    const [product] = await new LidlIrelandProvider({ fetcher: fetchWith(payload) }).search('milk');
+    assert.equal(product.in_stock, expected, text);
+  }
+});
