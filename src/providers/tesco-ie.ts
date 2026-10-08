@@ -1,0 +1,688 @@
+/**
+ * Tesco Ireland — read-only catalogue search.
+ *
+ * Two independently documented read paths are supported:
+ *
+ *   xapi  — one GraphQL `search` operation, including seller prices.
+ *   index — `search.api.tesco.com` returns Irish TPNBs, then xapi batch-
+ *           hydrates each product through `GetProductByTpnb`.
+ *
+ * `auto` prefers the cheaper one-request xapi path and falls back to the index
+ * path only when the GraphQL search projection is unavailable. It never falls
+ * back on authentication, rate-limit, or bot-block errors because doing so
+ * would turn one rejected request into a burst of more rejected requests.
+ *
+ * This provider is intentionally search-only and separate from the existing GB
+ * Tesco provider. No basket, slot, order, login, or checkout mutation is sent.
+ */
+import { randomUUID as uuid } from 'node:crypto';
+import type { GroceryProvider, Product, SearchOptions } from './types';
+import {
+  asRecord,
+  clampLimit,
+  clampOffset,
+  explicitBooleanState,
+  firstString,
+  type FetchLike,
+  ProviderHttpError,
+  ProviderProtocolError,
+  requireQuery,
+  responseText,
+} from './ie/shared';
+
+export const TESCO_IE_SEARCH_ENDPOINT = 'https://search.api.tesco.com/search';
+export const TESCO_XAPI_ENDPOINT = 'https://xapi.tesco.com/';
+
+/** Public key embedded in Tesco's web bundles. It rotates; env override wins. */
+export const TESCO_CURRENT_PUBLIC_API_KEY = 'TvOSZJHlEk0pjniDGQFAc9Q59WGAR4dA';
+
+const env = (name: string): string | undefined => process.env[name]?.trim() || undefined;
+
+// Retail prices must be numeric; do not strip arbitrary text into a price.
+function firstNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value !== 'number' && !(typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim()))) continue;
+    const number = Number(value);
+    if (Number.isFinite(number) && number >= 0) return number;
+  }
+  return undefined;
+}
+
+const ORIGIN = 'https://www.tesco.ie';
+const REFERER = 'https://www.tesco.ie/shop/en-IE/';
+
+const XAPI_SEARCH_QUERY = `
+query Search($query: String!, $page: Int = 1, $count: Int) {
+  search(query: $query, page: $page, count: $count) {
+    results {
+      node {
+        __typename
+        ... on ProductInterface {
+          productType: __typename
+          tpnc
+          tpnb
+          gtin
+          title
+          brandName
+          defaultImageUrl
+          isForSale
+          details { packSize { value units } }
+          sellers {
+            results {
+              price { actual unitPrice unitOfMeasure }
+              promotions {
+                description
+                price { afterDiscount beforeDiscount }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`.trim();
+
+const PRODUCT_BY_TPNB_QUERY = `
+query GetProductByTpnb($tpnb: String) {
+  product(tpnb: $tpnb) {
+    id
+    tpnc
+    tpnb
+    gtin
+    title
+    brandName
+    defaultImageUrl
+    isForSale
+    details { packSize { value units } }
+    sellers {
+      results {
+        price { actual unitPrice unitOfMeasure }
+        promotions {
+          description
+          price { afterDiscount beforeDiscount }
+        }
+      }
+    }
+  }
+}`.trim();
+
+const GET_PRODUCT_QUERY = `
+query GetProduct($tpnc: String!) {
+  product(tpnc: $tpnc) {
+    id
+    tpnc
+    tpnb
+    gtin
+    title
+    brandName
+    defaultImageUrl
+    isForSale
+    details { packSize { value units } }
+    sellers {
+      results {
+        price { actual unitPrice unitOfMeasure }
+        promotions {
+          description
+          price { afterDiscount beforeDiscount }
+        }
+      }
+    }
+  }
+}`.trim();
+
+interface GraphQLOperation {
+  operationName: string;
+  query: string;
+  variables: Record<string, unknown>;
+  extensions?: { mfeName: string };
+}
+
+interface GraphQLEnvelope {
+  data?: unknown;
+  errors?: unknown;
+}
+
+type TescoProductIdKind = 'tpnb' | 'tpnc';
+
+export type TescoIrelandSearchStrategy = 'auto' | 'xapi' | 'index';
+
+export interface TescoIrelandOptions {
+  fetcher?: FetchLike;
+  apiKey?: string;
+  strategy?: TescoIrelandSearchStrategy;
+  xapiEndpoint?: string;
+  searchEndpoint?: string;
+  userAgent?: string;
+}
+
+class TescoSearchProjectionError extends ProviderProtocolError {
+  constructor(message: string) {
+    super('Tesco Ireland', message);
+    this.name = 'TescoSearchProjectionError';
+  }
+}
+
+function packSize(details: unknown): string | undefined {
+  const pack = asRecord(asRecord(details).packSize);
+  const value = firstString(pack.value) ??
+    (firstNumber(pack.value) !== undefined ? String(firstNumber(pack.value)) : undefined);
+  const units = firstString(pack.units);
+  if (!value) return undefined;
+  return units ? `${value} ${units}` : value;
+}
+
+function optionalRecord(value: unknown, label: string): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ProviderProtocolError('Tesco Ireland', `invalid ${label}: expected an object`);
+  }
+  return asRecord(value);
+}
+
+function seller(node: Record<string, unknown>): Record<string, unknown> {
+  if (node.sellers === undefined || node.sellers === null) return {};
+  const sellers = optionalRecord(node.sellers, 'sellers');
+  if (!Array.isArray(sellers.results) || sellers.results.some(value =>
+    value === null || typeof value !== 'object' || Array.isArray(value))) {
+    throw new ProviderProtocolError('Tesco Ireland', 'invalid sellers.results: expected seller records');
+  }
+  return asRecord(sellers.results[0]);
+}
+
+function firstFieldString(label: string, ...values: unknown[]): string | undefined {
+  const texts = values.filter(value => value !== undefined && value !== null).map(value => {
+    const text = firstString(value);
+    if (!text) throw new ProviderProtocolError('Tesco Ireland', `invalid ${label}: expected a non-empty string`);
+    return text;
+  });
+  return texts[0];
+}
+
+function productPrice(node: Record<string, unknown>): number | undefined {
+  const firstSeller = seller(node);
+  const sellerPrice = optionalRecord(firstSeller.price, 'seller price');
+  const directPrice = optionalRecord(node.price, 'direct price');
+  const prices = [sellerPrice.actual, directPrice.actual]
+    .filter(value => value !== undefined && value !== null)
+    .map(value => {
+      const price = firstNumber(value);
+      if (price === undefined) throw new ProviderProtocolError('Tesco Ireland', 'invalid regular price');
+      return price;
+    });
+  return prices[0];
+}
+
+function unitPrice(node: Record<string, unknown>): Product['unit_price'] | undefined {
+  const sellerPrice = optionalRecord(seller(node).price, 'seller price');
+  const directPrice = optionalRecord(node.price, 'direct price');
+  const directUnit = optionalRecord(node.unitPrice, 'unit price');
+  const candidates = [
+    [directUnit.price, directUnit.measure],
+    [sellerPrice.unitPrice, sellerPrice.unitOfMeasure],
+    [directPrice.unitPrice, directPrice.unitOfMeasure],
+  ].map(([value, unit]) => {
+    const price = value === undefined || value === null ? undefined : firstNumber(value);
+    if (value !== undefined && value !== null && price === undefined) {
+      throw new ProviderProtocolError('Tesco Ireland', 'invalid unit price');
+    }
+    const measure = firstFieldString('unit measure', unit);
+    return { price, measure };
+  });
+  // Keep price and measure from one upstream source; never combine €/kg with
+  // a different source's price or an invented unit.
+  const matched = candidates.find(candidate => candidate.price !== undefined && candidate.measure !== undefined);
+  return matched ? { price: matched.price!, measure: matched.measure! } : undefined;
+}
+
+function parsedStockState(value: unknown): boolean | null | undefined {
+  const state = firstString(value);
+  if (!state) return undefined;
+  if (/^(?:in[_ -]?stock|available)$/i.test(state)) return true;
+  if (/^(?:out[_ -]?of[_ -]?stock|unavailable|sold[_ -]?out)$/i.test(state)) return false;
+  return null;
+}
+
+function mapProduct(node: Record<string, unknown>): Product | undefined {
+  // TPNB is available in both search strategies. Prefer it so the same
+  // catalogue product keeps one identity across xapi and index hydration.
+  const id = firstFieldString('product identity', node.tpnb, node.tpnc, node.id);
+  const title = firstFieldString('product name', node.title, node.name);
+  const price = productPrice(node);
+  const unit = unitPrice(node);
+  if (!id || !title || price === undefined) return undefined;
+  const availability = asRecord(node.availability);
+  const stockSignals = [
+    parsedStockState(availability.status),
+    parsedStockState(availability.state),
+  ];
+  const inStock = stockSignals.includes(null)
+    ? null
+    : explicitBooleanState(...stockSignals);
+  return {
+    product_uid: id,
+    name: title,
+    // A loyalty promotion describes a conditional offer, not this regular price.
+    description: firstString(node.description),
+    retail_price: { price },
+    unit_price: unit,
+    // isForSale and a positive price prove sale eligibility, not inventory.
+    // Current anonymous IE responses omit a usable product stock state.
+    in_stock: inStock,
+    image_url: firstString(node.defaultImageUrl, node.imageUrl),
+    provider: 'tesco-ie',
+    currency: 'EUR',
+    size: packSize(node.details),
+  };
+}
+
+function graphQlMessages(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) return ['malformed GraphQL errors collection'];
+  return value.map(error =>
+    firstString(asRecord(error).message) ?? 'unknown GraphQL error');
+}
+
+function graphQlFailureMessage(envelopes: GraphQLEnvelope[], messages: string[]): string {
+  const metadata = envelopes.flatMap(envelope => Array.isArray(envelope.errors) ? envelope.errors : [])
+    .map(error => {
+      const extensions = asRecord(asRecord(error).extensions);
+      return [extensions.code, extensions.status, asRecord(extensions.http).status].join(' ');
+    }).join(' ');
+  const classification = [...messages, metadata].join(' ');
+  if (/unauth|authenticat|authorization|forbidden|invalid.?client|\b401\b|\b403\b/i.test(classification)) {
+    return 'GraphQL authentication or access rejected; anonymous catalogue access is unavailable. Check the current public web API key before retrying.';
+  }
+  if (/rate.?limit|throttl|too many requests|\b429\b/i.test(classification)) {
+    return 'GraphQL request rate limited. Stop and retry later.';
+  }
+  return 'GraphQL upstream request failed. Check the current retailer API schema and access before retrying.';
+}
+
+function isProjectionFailure(messages: readonly string[], envelopes: GraphQLEnvelope[]): boolean {
+  const errors = envelopes.flatMap(envelope => Array.isArray(envelope.errors) ? envelope.errors : []);
+  const knownValidationCodes = errors.every(error => {
+    const value = asRecord(error).extensions;
+    if (value === undefined || value === null) return true;
+    if (typeof value !== 'object' || Array.isArray(value)) return false;
+    const extensions = asRecord(value);
+    // Unknown codes or explicit HTTP error metadata cannot establish a safe
+    // schema fallback. In particular, never retry auth/rate-limit errors.
+    if (extensions.code !== undefined && extensions.code !== null &&
+        extensions.code !== 'GRAPHQL_VALIDATION_FAILED') return false;
+    return extensions.status === undefined && extensions.http === undefined;
+  });
+  return knownValidationCodes && messages.every((message) =>
+    !/unauth|authenticat|authorization|forbidden|rate.?limit|throttl|too many requests|\b(?:401|403|429)\b/i.test(message) &&
+    (/^(?:cannot query field|unknown field)\s+["']?search["']?\s+on\s+type\s+["']?Query["']?\.?\s*$/i.test(message) ||
+    /^unknown argument\s+["']?(?:query|page|count)["']?\s+on\s+field\s+["']?Query\.search["']?\.?\s*$/i.test(message))
+  );
+}
+
+export class TescoIrelandProvider implements GroceryProvider {
+  readonly name = 'tesco-ie';
+  private readonly apiKey: string;
+  private readonly fetcher: FetchLike;
+  private readonly strategy: TescoIrelandSearchStrategy;
+  private readonly xapiEndpoint: string;
+  private readonly searchEndpoint: string;
+  private readonly userAgent: string;
+
+  constructor(options: TescoIrelandOptions = {}) {
+    this.apiKey =
+      options.apiKey ??
+      env('SUPERMARKET_TESCO_IE_API_KEY') ??
+      env('TESCO_IE_API_KEY') ??
+      env('TESCO_API_KEY') ??
+      TESCO_CURRENT_PUBLIC_API_KEY;
+    this.fetcher = options.fetcher ?? fetch;
+    this.strategy = options.strategy ?? 'auto';
+    this.xapiEndpoint = options.xapiEndpoint ?? TESCO_XAPI_ENDPOINT;
+    this.searchEndpoint = options.searchEndpoint ?? TESCO_IE_SEARCH_ENDPOINT;
+    this.userAgent =
+      options.userAgent ??
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
+        '(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
+  }
+
+  async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
+    const normalizedQuery = requireQuery(query);
+    if (options.category !== undefined) throw new RangeError('Tesco Ireland does not support category filters');
+    const limit = clampLimit(options.limit, 10, 50);
+    const offset = clampOffset(options.offset);
+
+    if (this.strategy === 'xapi') {
+      return this.searchXapi(normalizedQuery, limit, offset);
+    }
+    if (this.strategy === 'index') {
+      return this.searchIndex(normalizedQuery, limit, offset);
+    }
+
+    try {
+      return await this.searchXapi(normalizedQuery, limit, offset);
+    } catch (error) {
+      if (!(error instanceof TescoSearchProjectionError)) throw error;
+      return this.searchIndex(normalizedQuery, limit, offset);
+    }
+  }
+
+  async getProduct(productId: string): Promise<Product> {
+    const suppliedId = requireQuery(productId);
+    const explicit = suppliedId.match(/^(tpnb|tpnc):(.*)$/i);
+    if (explicit) {
+      const kind = explicit[1]!.toLocaleLowerCase('en-IE') as TescoProductIdKind;
+      const id = requireQuery(explicit[2] ?? '');
+      const product = await this.lookupProduct(id, kind);
+      if (product) return product;
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        `no product returned for ${kind.toUpperCase()} identifier`
+      );
+    }
+
+    // Search emits a bare TPNB when one is available. Try that identity first.
+    // A clean not-found response may be a legacy bare TPNC, so make one bounded
+    // compatibility lookup. HTTP, GraphQL, and malformed-product errors stop.
+    const byTpnb = await this.lookupProduct(suppliedId, 'tpnb');
+    if (byTpnb) return byTpnb;
+    const byTpnc = await this.lookupProduct(suppliedId, 'tpnc');
+    if (byTpnc) return byTpnc;
+    throw new ProviderProtocolError(
+      'Tesco Ireland',
+      'no product returned for TPNB or legacy TPNC identifier'
+    );
+  }
+
+  private async lookupProduct(
+    id: string,
+    kind: TescoProductIdKind
+  ): Promise<Product | undefined> {
+    const byTpnb = kind === 'tpnb';
+    const envelopes = await this.executeBatch([
+      {
+        operationName: byTpnb ? 'GetProductByTpnb' : 'GetProduct',
+        query: byTpnb ? PRODUCT_BY_TPNB_QUERY : GET_PRODUCT_QUERY,
+        variables: byTpnb ? { tpnb: id } : { tpnc: id },
+        extensions: { mfeName: 'mfe-pdp' },
+      },
+    ]);
+    const data = asRecord(envelopes[0]?.data);
+    if (!Object.prototype.hasOwnProperty.call(data, 'product') || data.product === undefined) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        `${kind.toUpperCase()} lookup response was missing data.product`
+      );
+    }
+    if (data.product === null) {
+      return undefined;
+    }
+    const node = asRecord(data.product);
+    const returnedId = byTpnb ? firstFieldString('TPNB identity', node.tpnb) : firstFieldString('TPNC identity', node.tpnc, node.id);
+    if (returnedId !== id) {
+      throw new ProviderProtocolError('Tesco Ireland', `${kind.toUpperCase()} lookup returned a different or missing identity`);
+    }
+    const product = mapProduct(node);
+    if (!product) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        `${kind.toUpperCase()} lookup returned no valid priced product`
+      );
+    }
+    return product;
+  }
+
+  private async searchXapi(query: string, limit: number, offset: number): Promise<Product[]> {
+    const firstPage = Math.floor(offset / limit) + 1;
+    const offsetWithinPage = offset % limit;
+    const pageCount = offsetWithinPage === 0 ? 1 : 2;
+    if (firstPage + pageCount - 1 > 2_147_483_647) {
+      throw new RangeError('Tesco Ireland offset exceeds the supported GraphQL page range');
+    }
+    const operations = Array.from({ length: pageCount }, (_, index) => ({
+      operationName: 'Search',
+      query: XAPI_SEARCH_QUERY,
+      variables: { query, page: firstPage + index, count: limit },
+      extensions: { mfeName: 'mfe-plp' },
+    }));
+    const envelopes = await this.executeBatch(operations, { allowProjectionErrors: true });
+
+    // Examine the complete batch before considering fallback. A projection
+    // failure must not hide authentication or rate-limit errors on another page.
+    const messages = envelopes.flatMap(envelope => graphQlMessages(envelope.errors));
+    if (messages.length > 0) {
+      for (const envelope of envelopes) {
+        if (graphQlMessages(envelope.errors).length === 0 &&
+            !Array.isArray(asRecord(asRecord(envelope.data).search).results)) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned no results array');
+        }
+      }
+      if (isProjectionFailure(messages, envelopes)) {
+        throw new TescoSearchProjectionError('root Search projection is unavailable');
+      }
+      throw new ProviderProtocolError('Tesco Ireland', graphQlFailureMessage(envelopes, messages));
+    }
+    const results: unknown[] = [];
+    for (const envelope of envelopes) {
+      const data = asRecord(envelope.data);
+      const search = asRecord(data.search);
+      if (!Array.isArray(search.results)) {
+        throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned no results array');
+      }
+      results.push(...search.results);
+    }
+    const selectedResults = results.slice(offsetWithinPage, offsetWithinPage + limit);
+    const mappedProducts: Product[] = [];
+    let productRows = 0;
+    for (const result of selectedResults) {
+      const node = asRecord(asRecord(result).node);
+      // The alias occurs only inside ProductInterface, so it identifies products
+      // without a hard-coded list of concrete GraphQL product types.
+      if (node.__typename !== undefined) {
+        if (typeof node.__typename !== 'string' || !node.__typename.trim()) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid node type');
+        }
+        if (node.productType === undefined && Object.keys(node).every(key => key === '__typename')) {
+          continue;
+        }
+        if (node.productType !== node.__typename) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid product type marker');
+        }
+      } else if (node.productType !== undefined) {
+        throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid product type marker');
+      }
+      productRows += 1;
+      if (!firstFieldString('product identity', node.tpnb, node.tpnc, node.id) || !firstFieldString('product name', node.title, node.name)) {
+        throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned a malformed product identity or name');
+      }
+      const product = mapProduct(node);
+      if (product) {
+        mappedProducts.push(product);
+      } else {
+        const regularPrice = asRecord(seller(node).price).actual ?? asRecord(node.price).actual;
+        if (regularPrice !== undefined && regularPrice !== null) {
+          throw new ProviderProtocolError('Tesco Ireland', 'xapi Search returned an invalid regular price');
+        }
+      }
+    }
+    if (productRows > 0 && mappedProducts.length === 0) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        'xapi Search returned products but none had a stable ID, name, and numeric price'
+      );
+    }
+    return mappedProducts;
+  }
+
+  private async searchIndex(query: string, limit: number, offset: number): Promise<Product[]> {
+    const url = new URL(this.searchEndpoint);
+    url.searchParams.set('distchannel', 'ghs');
+    url.searchParams.set('query', query);
+    url.searchParams.set('count', String(limit));
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('geo', 'ie');
+
+    const response = await this.fetcher(url, {
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'en-IE,en;q=0.9',
+        Origin: ORIGIN,
+        Referer: `${ORIGIN}/`,
+        'User-Agent': this.userAgent,
+      },
+    });
+    if (!response.ok) {
+      throw new ProviderHttpError(
+        'Tesco Ireland search index',
+        response.status
+      );
+    }
+    const text = await responseText(response);
+
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(text);
+    } catch {
+      throw new ProviderProtocolError(
+        'Tesco Ireland search index',
+        'expected JSON; the retailer returned an invalid response or challenge page'
+      );
+    }
+
+    const root = asRecord(decoded);
+    const country = asRecord(root.ie);
+    const ghs = asRecord(country.ghs);
+    const products = asRecord(ghs.products);
+    if (!Array.isArray(products.results)) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland search index',
+        'missing `ie.ghs.products.results`'
+      );
+    }
+    const indexResults = products.results;
+    const tpnbs = indexResults.slice(0, limit).map((value) => {
+      const result = asRecord(value);
+      const tpnb = firstString(result.tpnb) ??
+        (typeof result.tpnb === 'number' && Number.isSafeInteger(result.tpnb) && result.tpnb >= 0
+          ? String(result.tpnb) : undefined);
+      if (!tpnb) {
+        throw new ProviderProtocolError('Tesco Ireland search index', 'product results contained no stable TPNB identifiers for a row');
+      }
+      return tpnb;
+    });
+    if (tpnbs.length === 0) return [];
+
+    const envelopes = await this.executeBatch(
+      tpnbs.map((tpnb) => ({
+        operationName: 'GetProductByTpnb',
+        query: PRODUCT_BY_TPNB_QUERY,
+        variables: { tpnb },
+        extensions: { mfeName: 'mfe-pdp' },
+      }))
+    );
+
+    const hydrated: Product[] = [];
+    const errors: string[] = [];
+    for (const [index, envelope] of envelopes.entries()) {
+      const data = asRecord(envelope.data);
+      if (!('product' in data) || data.product === undefined) {
+        errors.push(`hydration response ${index + 1} missing data.product`);
+        continue;
+      }
+      // A null product is an explicit catalogue miss, unlike malformed data.
+      if (data.product === null) continue;
+      const node = asRecord(data.product);
+      if (firstString(node.tpnb) !== tpnbs[index] || !firstString(node.title, node.name)) {
+        errors.push(`hydration response ${index + 1} contained a missing or mismatched identity/name`);
+        continue;
+      }
+      const product = mapProduct(node);
+      if (product) {
+        hydrated.push(product);
+      } else {
+        const regularPrice = asRecord(seller(node).price).actual ?? asRecord(node.price).actual;
+        // An ordinary unpriced catalogue row cannot be emitted, but need not
+        // discard other valid products. Invalid supplied prices remain errors.
+        if (regularPrice !== undefined && regularPrice !== null) {
+          errors.push(`hydration response ${index + 1} contained an invalid regular price`);
+        }
+      }
+    }
+    if (errors.length > 0 || hydrated.length === 0) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        `index found ${tpnbs.length} products but hydration failed: ` +
+          (errors.slice(0, 3).join('; ') || 'no hydration results could be mapped')
+      );
+    }
+    return hydrated.slice(0, limit);
+  }
+
+  private async executeBatch(
+    operations: GraphQLOperation[],
+    options: { allowProjectionErrors?: boolean } = {}
+  ): Promise<GraphQLEnvelope[]> {
+    const headers: Record<string, string> = {
+      'User-Agent': this.userAgent,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'Accept-Language': 'en-IE,en;q=0.9',
+      'x-apikey': this.apiKey,
+      region: 'IE',
+      language: 'en-IE',
+      Origin: ORIGIN,
+      Referer: REFERER,
+      traceid: `${uuid()}:${uuid()}`,
+      trkid: uuid(),
+      'apollographql-client-name': 'open-supermarkets',
+      'apollographql-client-version': '3-ie-search',
+    };
+
+    const response = await this.fetcher(this.xapiEndpoint, {
+      method: 'POST',
+      signal: AbortSignal.timeout(20_000),
+      headers,
+      body: JSON.stringify(operations),
+    });
+    // A failed body can be unreadable; the known HTTP status remains authoritative.
+    // Do not consume error payloads or allow their transport failure to mask it.
+    if (!response.ok) {
+      const error = new ProviderHttpError('Tesco Ireland', response.status);
+      if (response.status === 401 || response.status === 403) {
+        error.message += '. Anonymous catalogue access is unavailable. ' +
+          'The public web API key rotates; check SUPERMARKET_TESCO_IE_API_KEY before retrying.';
+      } else if (response.status === 429) {
+        error.message += '. Tesco Ireland rate limited the request (HTTP 429). Stop and retry later.';
+      }
+      throw error;
+    }
+    const text = await responseText(response);
+
+    let decoded: unknown;
+    try {
+      decoded = JSON.parse(text);
+    } catch {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        'expected JSON; the retailer returned an invalid response or challenge page'
+      );
+    }
+    const envelopes = (Array.isArray(decoded) ? decoded : [decoded]).map((value) => {
+      const record = asRecord(value);
+      return { data: record.data, errors: record.errors } satisfies GraphQLEnvelope;
+    });
+    if (envelopes.length !== operations.length) {
+      throw new ProviderProtocolError(
+        'Tesco Ireland',
+        `GraphQL batch returned ${envelopes.length} envelopes for ${operations.length} operations`
+      );
+    }
+
+    if (!options.allowProjectionErrors) {
+      const messages = envelopes.flatMap((envelope) => graphQlMessages(envelope.errors));
+      if (messages.length > 0) {
+        throw new ProviderProtocolError('Tesco Ireland', graphQlFailureMessage(envelopes, messages));
+      }
+    }
+    return envelopes;
+  }
+}

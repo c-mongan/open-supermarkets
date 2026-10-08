@@ -90,6 +90,17 @@ export const PROVIDERS: ProviderManifest[] = [
     credit: 'Protocol research from but3k4/supermarket-mcp (MIT), independently verified against the Irish grocery gateway',
     load: async () => (await import('./dunnes-ie')).DunnesIrelandProvider,
   },
+  {
+    id: 'tesco-ie',
+    label: 'Tesco Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'anonymous',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
+    load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
+  },
 
   // ── Netherlands ──────────────────────────────────────────────────────
   {

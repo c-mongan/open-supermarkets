@@ -550,14 +550,17 @@ test('dunnes: environment store IDs cannot enable unscoped public search', async
 });
 
 test('dunnes: country comparison preserves other results and reports missing store scope', async () => {
-  const {getManifest}=require('../src/providers/registry');
+  const {getManifest,list}=require('../src/providers/registry');
   const {compareProduct}=require('../src/providers');
   const lidl=getManifest('lidl-ie');
-  const previousLoad=lidl.load;
+  // Other unscoped Ireland search providers would otherwise make real requests.
+  const others=list({country:'IE',capability:'search'}).filter(m=>!['lidl-ie','dunnes-ie'].includes(m.id)&&!m.capabilities.includes('stores'));
+  const previousLoads=new Map([[lidl,lidl.load],...others.map(m=>[m,m.load])]);
   const previousFetch=globalThis.fetch;
   let requests=0;
   const product={product_uid:'comparison-fixture',name:'Offline bread',retail_price:{price:2},in_stock:null,provider:'lidl-ie',currency:'EUR'};
   lidl.load=async()=>class { name='lidl-ie'; async search(){return [product];} };
+  for(const m of others) m.load=async()=>class { name=m.id; async search(){return [];} };
   globalThis.fetch=async()=>{requests++;throw new Error('External requests are forbidden in this regression');};
   try {
     const results=await compareProduct('bread',undefined,2,'IE');
@@ -569,7 +572,7 @@ test('dunnes: country comparison preserves other results and reports missing sto
     assert.match(unsupported.error,/store-scoped.*Select a store or pass storeId/);
     assert.equal(requests,0);
   } finally {
-    lidl.load=previousLoad;
+    for(const [m,load] of previousLoads) m.load=load;
     globalThis.fetch=previousFetch;
   }
 });

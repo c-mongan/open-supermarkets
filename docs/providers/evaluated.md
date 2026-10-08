@@ -16,7 +16,7 @@ is a reason to re-probe, not a reason to stop.
 | Loblaws / PC Express | CA | blocked | HTTP 403 "Access Denied" on api.pcexpress.ca |
 | Target | US | blocked | RedSky now answers 403 + CAPTCHA challenge |
 | Walmart | US | blocked | consumer GraphQL returns HTTP 418 (bot detection) |
-| Tesco Ireland | IE | needs work | not a header switch; xapi rejects with "Invalid Client" |
+| ~~Tesco Ireland~~ | IE | **BUILT** | anonymous xapi search and index hydration verified 2026-10-03; regular EUR prices, stable TPNBs, stock unknown — see `src/providers/tesco-ie.ts` |
 | ~~Lidl Ireland~~ | IE | **BUILT** | anonymous catalogue search, regular EUR prices; stock stays unknown without retailer evidence — see `src/providers/lidl-ie.ts` |
 | ~~Mercadona~~ | ES | **BUILT** | Algolia key found in the frontend bundle — see src/providers/mercadona.ts |
 | ~~Tesco Hungary~~ | HU | **BUILT** | same xapi as the UK, selected by `region: HU` — see src/providers/tesco-hu/ |
@@ -152,10 +152,13 @@ possible addition; it is not reachable.
 returns HTTP 403 "Access Denied" (Akamai-style HTML). Canada is currently covered only
 by Instacart, which is itself gated.
 
-**Tesco Ireland (IE)** — not the free win Albert Heijn Belgium was. AH switches
-storefront on a request header; Tesco's `xapi.tesco.com` answers `Forbidden: Invalid
-Client`, so the IE storefront uses different client credentials that would have to be
-captured separately. Possible, but it is an investigation rather than a manifest entry.
+**Tesco Ireland (IE)** — the earlier `Forbidden: Invalid Client` failure did not
+reproduce on 2026-10-03 with the current public web key. Anonymous xapi search and
+`geo=ie` index search with xapi hydration both returned the same TPNB identifiers and
+regular EUR prices. A TPNB from search also round-tripped through product lookup.
+See [the provider verification notes](tesco-ie.md). This is catalogue evidence;
+store inventory, account pricing, login, basket, and checkout remain unsupported.
+A future rejected key fails with an actionable error, without automatic retries.
 
 ### Mercadona (ES) — the one genuinely worth picking up
 
@@ -215,7 +218,7 @@ page config points at `https://xapi.tesco.com/` with the UK's public `mangoApiKe
 the Hungarian catalogue: `product(tpnc: "205406742")` is "Banán lédig" here and
 `product-not-found` with `region: UK`.
 
-The Tesco Ireland note above ("Invalid Client") did not reproduce for Hungary — the
+The earlier Tesco Ireland failure ("Invalid Client") did not reproduce for Hungary — the
 same key works. Schema differs from the UK (`status`/`isForSale`/`price.unitPrice`
 instead of `isAvailable`/`displayPrice`/`unitPrice`); introspection is disabled, so
 field names came from the storefront's server-rendered Apollo cache.
