@@ -102,6 +102,18 @@ export const PROVIDERS: ProviderManifest[] = [
     load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
   },
 
+  {
+    id: 'mrprice-ie',
+    label: 'Mr Price Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol reimplemented from but3k4/supermarket-mcp (MIT)',
+    load: async () => (await import('./mrprice-ie')).MrPriceIrelandProvider,
+  },
+
   // ── Netherlands ──────────────────────────────────────────────────────
   {
     id: 'ah',

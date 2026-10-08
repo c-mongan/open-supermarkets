@@ -165,6 +165,7 @@ checkout needs an account, address and payment method, so it exists for fewer.
 | Lidl Ireland | 🇮🇪 | ✓ | — | — | — | none |
 | [Aldi Ireland](docs/providers/aldi-ie.md) (store discovery; explicit store selection) | 🇮🇪 | ✓ | — | — | — | none |
 | [Dunnes Stores Ireland](docs/providers/dunnes-ie.md) | 🇮🇪 | ✓; store lookup; explicit store | — | — | — | none |
+| [Mr Price Ireland](docs/providers/mrprice-ie.md) | 🇮🇪 | ✓ | — | — | — | none |
 | Albert Heijn | 🇳🇱 | ✓ | — | — | — | **none** |
 | Albert Heijn België | 🇧🇪 | ✓ | — | — | — | **none** |
 | Mercadona | 🇪🇸 | ✓ | — | — | — | **none** |
