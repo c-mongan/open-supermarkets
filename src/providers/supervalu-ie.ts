@@ -90,13 +90,15 @@ function mapProduct(item: Record<string, unknown>): Product | undefined {
     asRecord(item.price).value
   );
   if (!id || !name || price === undefined || price < 0) return undefined;
+  const loyaltyUnitPrice = hasLoyaltyDiscount ? parseUnitPrice(item.unitPriceWithoutLoyalty) : undefined;
+  if (hasLoyaltyDiscount && loyaltyUnitPrice === undefined) return undefined;
 
   return {
     product_uid: id,
     name,
     retail_price: { price },
     unit_price: hasLoyaltyDiscount
-      ? parseUnitPrice(item.unitPriceWithoutLoyalty)
+      ? loyaltyUnitPrice
       : parseUnitPrice(item.pricePerUnit) ?? parseUnitPrice(item.unitPrice) ?? parseUnitPrice(item.unitPriceText),
     in_stock: explicitBooleanState(
       item.available,

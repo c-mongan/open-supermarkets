@@ -11,7 +11,7 @@ supermarket search milk --provider supervalu-ie --store-id 76 --limit 2 --json
 
 Store lookup supports limits, offsets, text, postcode prefixes, and nearby coordinates. Nearby requests require both coordinates and reject exact store IDs, text/postcode filters, and offsets. Text/postcode lookup is bounded to ten remote pages. Requests have a ten-second fetch/body deadline. Store discovery has a thirty-second overall deadline. Category filters, basket, checkout, orders, and slots are unsupported. Country-wide comparison cannot select a store and is unsupported; use explicit store search instead.
 
-Product IDs, EUR prices, size, and stock come from the retailer. Prices use the gateway current price. An explicit loyalty discount uses the retailer’s non-member price and unit price; missing non-member prices remain unknown. Quantity thresholds and promotion markdowns do not replace the single-item price. Missing or conflicting stock is `null`. Malformed responses and HTTP errors are reported, not converted into empty results.
+Product IDs, EUR prices, size, and stock come from the retailer. Prices use the gateway current price. An explicit loyalty discount uses the retailer’s non-member price and unit price; rows missing either non-member value are dropped rather than priced from the member offer. Quantity thresholds and promotion markdowns do not replace the single-item price. Missing or conflicting stock is `null`. Malformed responses and HTTP errors are reported, not converted into empty results.
 
 ## Verification
 

@@ -415,6 +415,19 @@ test('supervalu: does not guess a missing non-member rewards price', async () =>
   await rejects(() => provider.search('coffee'), /valid products/);
 });
 
+test('supervalu: drops loyalty rows with a missing or malformed non-member unit price', async () => {
+  for (const unitPriceWithoutLoyalty of [undefined, 'not a price']) {
+    const provider = new SuperValuIrelandProvider({
+      storeId: '5550',
+      fetcher: queueFetch([jsonFixture('supervalu-stores.json'), { items: [{
+        productId: 'rewards', name: 'Rewards Coffee', priceNumeric: 8.75, pricePerUnit: '€46.05/kg',
+        hasLoyaltyDiscount: true, subtotalWithoutLoyalty: '€12.59', unitPriceWithoutLoyalty,
+      }] }]),
+    });
+    await rejects(() => provider.search('coffee'), /valid products/);
+  }
+});
+
 test('supervalu: rejects malformed loyalty flags instead of using a member price', async () => {
   for (const hasLoyaltyDiscount of ['true', 1, null]) {
     const provider = new SuperValuIrelandProvider({
