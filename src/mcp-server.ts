@@ -889,7 +889,7 @@ async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Open Supermarkets MCP Server v2.1.0 running on stdio');
-  console.error(`Providers: ${[...PROVIDERS, 'lidl-ie (search only)'].join(', ')}`);
+  console.error(`Providers: ${listManifests({ capability: 'search' }).map((m) => m.id).join(', ')}`);
 }
 
 main().catch((error) => {

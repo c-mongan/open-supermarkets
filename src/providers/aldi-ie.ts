@@ -1,0 +1,465 @@
+/**
+ * Aldi Ireland — anonymous catalogue search.
+ *
+ * Primary protocol evidence:
+ * - AviBackToBlack/lidaldi (MIT)
+ * - but3k4/supermarket-mcp (MIT)
+ * - fwhite2104/drinks-tracker (unlicensed; facts only, no copied code)
+ */
+import type {
+  GroceryProvider,
+  Product,
+  SearchOptions,
+  Store,
+  StoreSearchOptions,
+} from './types';
+import {
+  asNumber,
+  asString,
+  asRecord,
+  asRecords,
+  clampLimit,
+  clampOffset,
+  firstNumber,
+  firstString,
+  type FetchLike,
+  jsonResponse,
+  ProviderInputError,
+  ProviderProtocolError,
+  requireRecordArray,
+  requireQuery,
+} from './ie/shared';
+
+function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  const match = text.match(/^€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*((?:[0-9]+(?:[.,][0-9]+)?\s*)?(?:kg|g|l|ml|cl|each|ea|unit|pack))$/i);
+  if (!match) return undefined;
+  const price = asNumber(match[1]);
+  const measure = match[2]?.trim();
+  return price !== undefined && measure ? { price, measure } : undefined;
+}
+
+function joinBrandAndName(brand: unknown, name: unknown): string {
+  const b = asString(brand);
+  const n = asString(name);
+  if (!n) return b ?? 'Unknown product';
+  if (!b) return n;
+  const normalize = (value: string) =>
+    value.toLocaleLowerCase('en-IE').replace(/[^a-z0-9]+/g, ' ').trim();
+  const normalizedBrand = normalize(b);
+  const normalizedName = normalize(n);
+  const alreadyNamed = normalizedBrand &&
+    (normalizedName === normalizedBrand || normalizedName.startsWith(`${normalizedBrand} `));
+  return alreadyNamed ? n : `${b} ${n}`;
+}
+
+const PRIMARY_SEARCH = 'https://asl.api.aldi.ie/commerce/v3/product-search';
+const SERVICE_POINTS = 'https://asl.api.aldi.ie/commerce/v2/service-points';
+const ALLOWED_PAGE_SIZES = [12, 16, 24, 30, 32, 48, 60] as const;
+const STORE_LOOKUP_LIMIT = 20;
+const STORE_LOOKUP_MAX = 100;
+const STORE_LOOKUP_MAX_PAGES = 100;
+
+export interface AldiIrelandOptions {
+  fetcher?: FetchLike;
+  primarySearchUrl?: string;
+  servicePointsUrl?: string;
+  storeId?: string;
+  requestTimeoutMs?: number;
+  storeLookupTimeoutMs?: number;
+}
+
+function pageSize(limit: number): number {
+  return ALLOWED_PAGE_SIZES.find((size) => size >= limit) ?? 60;
+}
+
+function imageUrl(item: Record<string, unknown>): string | undefined {
+  const asset = asRecords(item.assets)[0];
+  const template = firstString(asset?.url);
+  const slug = firstString(item.urlSlugText) ?? 'image';
+  return template
+    ?.replace('{width}', '600')
+    .replace('{slug}', encodeURIComponent(slug));
+}
+
+function retailPrice(item: Record<string, unknown>): number | undefined {
+  const price = asRecord(item.price);
+  const currencies = [price.currencyCode, price.currency, item.currencyCode, item.currency];
+  if (currencies.some((value) => {
+    const currency = asString(value);
+    return currency !== undefined && currency.toUpperCase() !== 'EUR';
+  })) return undefined;
+  if ([price.amountRelevantDisplay, price.amountDisplay, price.amountRelevant, price.amount].some((value) =>
+    typeof value === 'string' && value.trim() !== '' &&
+    !/^(?:(?:€|EUR)\s*[+-]?[\d.,]+|[+-]?[\d.,]+\s*(?:€|EUR)|[+-]?[\d.,]+)$/i.test(value.trim())
+  )) return undefined;
+  // The live Aldi response includes both an integer minor-unit amount and a
+  // display value. Prefer the display value because it is already in EUR.
+  const display = firstNumber(asString(price.amountRelevantDisplay), asString(price.amountDisplay));
+  if (display !== undefined) return display;
+
+  // Both amountRelevant and amount are integer minor units in the live API.
+  const minorUnits = firstNumber(price.amountRelevant, price.amount);
+  return minorUnits !== undefined && Number.isSafeInteger(minorUnits)
+    ? minorUnits / 100
+    : undefined;
+}
+
+function mapProduct(item: Record<string, unknown>): Product | undefined {
+  const sku = firstString(item.sku);
+  const amount = retailPrice(item);
+  const price = asRecord(item.price);
+  const comparison = firstString(price.comparisonDisplay, item.comparisonDisplay);
+  const rawName = firstString(item.name);
+  if (!sku || !rawName || amount === undefined || amount < 0) return undefined;
+  const name = joinBrandAndName(item.brandName, rawName);
+
+  return {
+    product_uid: sku,
+    name,
+    description: firstString(item.description),
+    retail_price: { price: amount },
+    unit_price: parseUnitPrice(comparison),
+    // Catalogue availability does not prove inventory at the selected store.
+    // Only a stock-specific boolean can make a known stock assertion.
+    in_stock: typeof item.outOfStock === 'boolean' ? !item.outOfStock : null,
+    image_url: imageUrl(item),
+    provider: 'aldi-ie',
+    currency: 'EUR',
+    size: firstString(item.sellingSize, item.packSize),
+  };
+}
+
+function normalizedStoreId(value: unknown): string {
+  const storeId = firstString(value)?.toUpperCase();
+  if (!storeId) throw new ProviderInputError('Aldi Ireland', 'storeId must be a non-empty string');
+  return storeId;
+}
+
+function normalizedModes(value: unknown): string[] | undefined {
+  const candidates = Array.isArray(value) ? value : [value];
+  const modes = new Set<string>();
+  for (const candidate of candidates) {
+    const record = asRecord(candidate);
+    const mode = firstString(candidate, record.name, record.mode, record.serviceType);
+    if (mode) modes.add(mode.toLowerCase());
+  }
+  return modes.size > 0 ? [...modes] : undefined;
+}
+
+function aldiStore(item: Record<string, unknown>): Store | undefined {
+  const servicePoint = asRecord(item.servicePoint);
+  const storeId = firstString(item.servicePoint, servicePoint.id, item.id);
+  const addressRecord = asRecord(item.address);
+  const location = asRecord(item.location);
+  const coordinates = asRecord(item.coordinates);
+  const latitude = firstNumber(
+    item.latitude,
+    addressRecord.latitude,
+    location.latitude,
+    coordinates.latitude,
+    coordinates.lat
+  );
+  const longitude = firstNumber(
+    item.longitude,
+    addressRecord.longitude,
+    location.longitude,
+    coordinates.longitude,
+    coordinates.lng
+  );
+  const addressParts = [
+    addressRecord.address1,
+    addressRecord.address2,
+    addressRecord.address3,
+    addressRecord.addressLine1,
+    addressRecord.addressLine2,
+    addressRecord.street,
+    addressRecord.city,
+    addressRecord.county,
+    addressRecord.regionName,
+    addressRecord.countryName,
+    addressRecord.country,
+  ]
+    .map((value) => firstString(value))
+    .filter((value): value is string => value !== undefined);
+  const seenAddressParts = new Set<string>();
+  const address = addressParts
+    .filter((value) => {
+      const key = value.toLowerCase();
+      if (seenAddressParts.has(key)) return false;
+      seenAddressParts.add(key);
+      return true;
+    })
+    .join(', ');
+  const name = firstString(item.name, item.displayName, servicePoint.name);
+  if (!storeId || !name) return undefined;
+  return {
+    store_id: normalizedStoreId(storeId),
+    name,
+    ...(firstString(item.status, item.state)
+      ? { status: firstString(item.status, item.state)!.toLowerCase() }
+      : {}),
+    postcode: firstString(
+      item.postcode,
+      item.postalCode,
+      addressRecord.zipCode,
+      addressRecord.postcode,
+      addressRecord.postalCode
+    )?.toUpperCase(),
+    address: address || firstString(item.address),
+    location: latitude !== undefined && longitude !== undefined &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+      ? { latitude, longitude } : undefined,
+    shopping_modes: normalizedModes(
+      item.availableCustomerServiceTypes ?? item.serviceTypes ?? item.shoppingModes ?? item.serviceType
+    ),
+  };
+}
+
+function storeLookupOptions(options: StoreSearchOptions): {
+  limit: number;
+  offset: number;
+  fullTextSearch?: string;
+  postcode?: string;
+  latitude?: number;
+  longitude?: number;
+} {
+  if (options.range !== undefined) {
+    throw new ProviderInputError('Aldi Ireland', 'Aldi store lookup does not support a range filter');
+  }
+  if (options.shoppingMode !== undefined) {
+    throw new ProviderInputError('Aldi Ireland',
+      'Aldi Ireland exposes walk-in service points only; pickup and delivery filters are unsupported'
+    );
+  }
+  if (options.retailerStoreId !== undefined) {
+    throw new ProviderInputError('Aldi Ireland',
+      'Aldi store lookup does not support retailerStoreId filtering; use selectStore for validated selection'
+    );
+  }
+  const limit = clampLimit(options.limit, STORE_LOOKUP_LIMIT, STORE_LOOKUP_MAX);
+  const offset = clampOffset(options.offset);
+  const fullTextSearch = options.fullTextSearch === undefined
+    ? undefined
+    : requireQuery(options.fullTextSearch);
+  const postcode = options.postcode === undefined ? undefined : requireQuery(options.postcode);
+  const coordinatesSpecified = options.latitude !== undefined || options.longitude !== undefined;
+  if (fullTextSearch && postcode) {
+    throw new ProviderInputError('Aldi Ireland', 'fullTextSearch cannot be combined with postcode');
+  }
+  if (postcode && coordinatesSpecified) {
+    throw new ProviderInputError('Aldi Ireland', 'postcode cannot be combined with coordinates');
+  }
+  if (!coordinatesSpecified) return { limit, offset, fullTextSearch, postcode };
+  if (fullTextSearch) {
+    throw new ProviderInputError('Aldi Ireland', 'fullTextSearch cannot be combined with coordinates');
+  }
+  if (
+    options.latitude === undefined ||
+    options.longitude === undefined ||
+    !Number.isFinite(options.latitude) ||
+    !Number.isFinite(options.longitude) ||
+    options.latitude < -90 || options.latitude > 90 ||
+    options.longitude < -180 || options.longitude > 180
+  ) {
+    throw new ProviderInputError('Aldi Ireland', 'latitude and longitude must be valid coordinates');
+  }
+  return { limit, offset, postcode, latitude: options.latitude, longitude: options.longitude };
+}
+
+export class AldiIrelandProvider implements GroceryProvider {
+  readonly name = 'aldi-ie';
+  private readonly fetcher: FetchLike;
+  private readonly searchUrl: string;
+  private readonly servicePointsUrl: string;
+  private readonly requestTimeoutMs: number;
+  private readonly storeLookupTimeoutMs: number;
+  private storeId?: string;
+  private readonly validatedStoreIds = new Set<string>();
+
+  constructor(options: AldiIrelandOptions = {}) {
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 20_000;
+    this.storeLookupTimeoutMs = options.storeLookupTimeoutMs ?? 30_000;
+    for (const timeout of [this.requestTimeoutMs, this.storeLookupTimeoutMs]) {
+      if (!Number.isSafeInteger(timeout) || timeout <= 0 || timeout > 2_147_483_647) {
+        throw new ProviderInputError('Aldi Ireland', 'timeouts must be positive timer-safe integers');
+      }
+    }
+    this.fetcher = options.fetcher ?? fetch;
+    this.searchUrl = options.primarySearchUrl ?? PRIMARY_SEARCH;
+    this.servicePointsUrl = options.servicePointsUrl ?? SERVICE_POINTS;
+    const storeId = options.storeId;
+    this.storeId = storeId === undefined ? undefined : normalizedStoreId(storeId);
+  }
+
+  async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
+    const normalizedQuery = requireQuery(query);
+    if (options.category !== undefined) {
+      throw new ProviderInputError('Aldi Ireland', 'Aldi Ireland search does not support category filtering');
+    }
+    const limit = clampLimit(options.limit, 10, 60);
+    const offset = clampOffset(options.offset);
+    const requestedStoreId = options.storeId ?? this.storeId;
+    const storeId = requestedStoreId === undefined
+      ? undefined
+      : await this.validatedStoreId(requestedStoreId);
+    if (!storeId) {
+      throw new ProviderInputError('Aldi Ireland',
+        'Aldi Ireland requires an explicit store id. Pass --store-id.'
+      );
+    }
+    const url = new URL(this.searchUrl);
+    url.searchParams.set('q', normalizedQuery);
+    url.searchParams.set('currency', 'EUR');
+    url.searchParams.set('limit', String(pageSize(limit)));
+    url.searchParams.set('offset', String(offset));
+    url.searchParams.set('serviceType', 'walk-in');
+    url.searchParams.set('sort', 'RELEVANCE');
+    url.searchParams.set('servicePoint', storeId);
+    const payload = await this.requestJson(
+      url, {
+        headers: {
+          Accept: 'application/json',
+          'Accept-Language': 'en-IE,en;q=0.9',
+        },
+      },
+      'Aldi Ireland'
+    );
+    const root = asRecord(payload);
+    const source = root.data;
+    const rows = requireRecordArray(source, 'Aldi Ireland', 'data collection');
+    const products = rows
+      .map(mapProduct)
+      .filter((product): product is Product => product !== undefined);
+    if (Array.isArray(source) && source.length > 0 && products.length === 0) {
+      throw new ProviderProtocolError(
+        'Aldi Ireland',
+        'data collection contained no valid products'
+      );
+    }
+    return products.slice(0, limit);
+  }
+
+  async listStores(options: StoreSearchOptions = {}): Promise<Store[]> {
+    return (await this.storePage(options)).stores;
+  }
+
+  private async storePage(options: StoreSearchOptions, timeoutMs = this.requestTimeoutMs): Promise<{
+    stores: Store[]; invalidStoreIds: string[]; rawCount: number; pageSize: number; totalCount?: number;
+  }> {
+    const selection = storeLookupOptions(options);
+    const url = new URL(this.servicePointsUrl);
+    url.searchParams.set('offset', String(selection.offset));
+    url.searchParams.set('limit', String(selection.limit));
+    url.searchParams.set('serviceType', 'walk-in');
+    if (selection.fullTextSearch) url.searchParams.set('fullTextSearch', selection.fullTextSearch);
+    if (selection.postcode) url.searchParams.set('addressZipcode', selection.postcode);
+    if (selection.latitude !== undefined) {
+      url.searchParams.set('latitude', String(selection.latitude));
+      url.searchParams.set('longitude', String(selection.longitude));
+      url.searchParams.set('includeNearbyServicePoints', 'true');
+    }
+    const payload = await this.requestJson(
+      url, { headers: { Accept: 'application/json', 'Accept-Language': 'en-IE,en;q=0.9' } },
+      'Aldi Ireland stores', timeoutMs
+    );
+    const root = asRecord(payload);
+    const data = asRecord(root.data);
+    const source = Array.isArray(root.data)
+      ? root.data
+      : data.servicePoints ?? data.items ?? data.results;
+    const rows = requireRecordArray(source, 'Aldi Ireland stores', 'service-point collection');
+    const mappedStores = rows.map(aldiStore);
+    const stores = mappedStores.filter((store): store is Store => store !== undefined);
+    const invalidStoreIds = rows.flatMap((row, index) => {
+      if (mappedStores[index]) return [];
+      const id = firstString(row.servicePoint, asRecord(row.servicePoint).id, row.id);
+      return id ? [normalizedStoreId(id)] : [];
+    });
+    if (Array.isArray(source) && source.length > 0 && stores.length === 0) {
+      throw new ProviderProtocolError('Aldi Ireland stores', 'service-point collection contained no valid stores');
+    }
+    const pagination = asRecord(asRecord(root.meta).pagination);
+    const reportedPageSize = firstNumber(pagination.limit);
+    const pageSize = reportedPageSize ?? selection.limit;
+    const totalCount = firstNumber(pagination.totalCount);
+    const reportedOffset = firstNumber(pagination.offset);
+    const rawCount = (source as unknown[]).length;
+    if ((pagination.offset !== undefined && (reportedOffset === undefined ||
+          !Number.isSafeInteger(reportedOffset) || reportedOffset !== selection.offset)) ||
+        (pagination.limit !== undefined && reportedPageSize === undefined) ||
+        (pagination.totalCount !== undefined && totalCount === undefined) ||
+        !Number.isInteger(pageSize) || pageSize < 1 || pageSize > selection.limit ||
+        rawCount > pageSize ||
+        (totalCount !== undefined && (!Number.isSafeInteger(totalCount) || totalCount < 0 ||
+          (rawCount > 0 && totalCount < selection.offset + rawCount)))) {
+      throw new ProviderProtocolError('Aldi Ireland stores', 'invalid store pagination metadata');
+    }
+    return { stores, invalidStoreIds, rawCount, pageSize, totalCount };
+  }
+
+  private async requestJson(url: URL, init: RequestInit, provider: string, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const message = `${provider} request timed out after ${timeoutMs} ms`;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(message));
+        controller.abort();
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => jsonResponse<unknown>(await this.fetcher(url, { ...init, signal: controller.signal }), provider))(),
+        deadline,
+      ]);
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error(message);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async selectStore(storeId: string): Promise<void> {
+    this.storeId = await this.validatedStoreId(storeId);
+  }
+
+  private async validatedStoreId(storeId: string): Promise<string> {
+    const selectedStoreId = normalizedStoreId(storeId);
+    if (this.validatedStoreIds.has(selectedStoreId)) return selectedStoreId;
+    const seen = new Set<string>();
+    let offset = 0;
+    const deadline = Date.now() + this.storeLookupTimeoutMs;
+    for (let page = 0; page < STORE_LOOKUP_MAX_PAGES; page++) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('Aldi Ireland stores lookup timed out');
+      const result = await this.storePage({ limit: STORE_LOOKUP_MAX, offset }, Math.min(this.requestTimeoutMs, remaining));
+      const { stores, invalidStoreIds, rawCount, pageSize, totalCount } = result;
+      if (invalidStoreIds.includes(selectedStoreId)) {
+        throw new ProviderProtocolError('Aldi Ireland stores', `service point ${selectedStoreId} had an invalid store record`);
+      }
+      if (stores.some((store) => store.store_id === selectedStoreId)) {
+        this.validatedStoreIds.add(selectedStoreId);
+        return selectedStoreId;
+      }
+      if (stores.some((store) => seen.has(store.store_id))) {
+        throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned overlapping identifiers');
+      }
+      for (const store of stores) seen.add(store.store_id);
+      const exhausted = totalCount === undefined
+        ? rawCount === 0
+        : offset + rawCount >= totalCount;
+      if (exhausted) {
+        throw new ProviderInputError('Aldi Ireland', `service point ${selectedStoreId} was not found`);
+      }
+      if (totalCount !== undefined && rawCount !== pageSize) {
+        throw new ProviderProtocolError('Aldi Ireland stores', 'store pagination returned an incomplete page');
+      }
+      offset += totalCount === undefined ? rawCount : pageSize;
+    }
+    throw new ProviderProtocolError('Aldi Ireland stores', 'store validation exceeded the 100-page safety limit');
+  }
+
+}

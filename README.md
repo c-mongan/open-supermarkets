@@ -163,6 +163,8 @@ checkout needs an account, address and payment method, so it exists for fewer.
 | Ocado | 🇬🇧 | ✓ | ✓ | read-only | — | email + password |
 | [Tesco Ireland](docs/providers/tesco-ie.md) | 🇮🇪 | ✓ | — | — | — | anonymous (public web API key) |
 | Lidl Ireland | 🇮🇪 | ✓ | — | — | — | none |
+| [Aldi Ireland](docs/providers/aldi-ie.md) (store discovery; explicit store selection) | 🇮🇪 | ✓ | — | — | — | none |
+| [Dunnes Stores Ireland](docs/providers/dunnes-ie.md) | 🇮🇪 | ✓; store lookup; explicit store | — | — | — | none |
 | Albert Heijn | 🇳🇱 | ✓ | — | — | — | **none** |
 | Albert Heijn België | 🇧🇪 | ✓ | — | — | — | **none** |
 | Mercadona | 🇪🇸 | ✓ | — | — | — | **none** |
