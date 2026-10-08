@@ -1,0 +1,579 @@
+/**
+ * SuperValu Ireland — store-scoped catalogue search.
+ *
+ * Prices and assortment vary by retailer/store. The provider refuses to run
+ * without an explicit store id rather than presenting one store as national.
+ */
+import type {
+  GroceryProvider,
+  Product,
+  SearchOptions,
+  Store,
+  StoreSearchOptions,
+} from './types';
+import {
+  absoluteUrl,
+  asRecord,
+  asString,
+  asNumber,
+  clampLimit,
+  clampOffset,
+  explicitBooleanState,
+  firstNumber,
+  firstString,
+  type FetchLike,
+  jsonResponse,
+  ProviderInputError,
+  ProviderProtocolError,
+  requireRecordArray,
+  requireQuery,
+} from './ie/shared';
+
+function parseUnitPrice(value: unknown): Product['unit_price'] | undefined {
+  const text = asString(value);
+  if (!text) return undefined;
+  const match = text.match(/^\s*€?\s*([0-9]+(?:[.,][0-9]+)?)\s*\/\s*(.+)$/i);
+  if (!match) return undefined;
+  const price = asNumber(match[1]);
+  const measure = match[2]?.trim();
+  return price !== undefined && measure ? { price, measure } : undefined;
+}
+
+
+function env(name: string): string | undefined {
+  const processLike = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  const value = processLike.process?.env?.[name];
+  return asString(value);
+}
+
+const BASE_URL = 'https://shop.supervalu.ie';
+const GATEWAY_BASE = 'https://storefrontgateway.supervalu.ie/api';
+const STORE_LOOKUP_LIMIT = 20;
+const STORE_LOOKUP_MAX = 100;
+const MAX_STORE_PAGES = 10;
+const DEFAULT_NEARBY_RANGE_KM = 10;
+const SHOPPING_MODE_IDS = {
+  pickup: '11111111-1111-1111-1111-111111111111',
+  delivery: '22222222-2222-2222-2222-222222222222',
+} as const;
+
+export interface SuperValuIrelandOptions {
+  storeId?: string;
+  cookieHeader?: string;
+  fetcher?: FetchLike;
+  gatewayBase?: string;
+  requestTimeoutMs?: number;
+  storeLookupTimeoutMs?: number;
+}
+
+function productPrice(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+    if (typeof value !== 'string') continue;
+    const text = value.trim();
+    if (!/^(?:€\s*)?\d+(?:[.,]\d{1,2})?$/.test(text)) continue;
+    const price = Number(text.replace('€', '').trim().replace(',', '.'));
+    if (Number.isFinite(price)) return price;
+  }
+  return undefined;
+}
+
+function mapProduct(item: Record<string, unknown>): Product | undefined {
+  const name = firstString(item.name, item.title, item.productName);
+  const id = firstString(item.id, item.productId, item.sku);
+  if (item.hasLoyaltyDiscount !== undefined && typeof item.hasLoyaltyDiscount !== 'boolean') return undefined;
+  const hasLoyaltyDiscount = item.hasLoyaltyDiscount === true;
+  const price = hasLoyaltyDiscount ? productPrice(item.subtotalWithoutLoyalty) : productPrice(
+    item.priceNumeric,
+    item.currentPrice,
+    item.price,
+    asRecord(item.price).value
+  );
+  if (!id || !name || price === undefined || price < 0) return undefined;
+  const loyaltyUnitPrice = hasLoyaltyDiscount ? parseUnitPrice(item.unitPriceWithoutLoyalty) : undefined;
+  if (hasLoyaltyDiscount && loyaltyUnitPrice === undefined) return undefined;
+
+  return {
+    product_uid: id,
+    name,
+    retail_price: { price },
+    unit_price: hasLoyaltyDiscount
+      ? loyaltyUnitPrice
+      : parseUnitPrice(item.pricePerUnit) ?? parseUnitPrice(item.unitPrice) ?? parseUnitPrice(item.unitPriceText),
+    in_stock: explicitBooleanState(
+      item.available,
+      typeof item.outOfStock === 'boolean' ? !item.outOfStock : undefined
+    ),
+    image_url: absoluteUrl(
+      BASE_URL,
+      firstString(item.imageUrl, item.image, asRecord(item.image).url, asRecord(item.image).default)
+    ),
+    provider: 'supervalu-ie',
+    currency: 'EUR',
+    size: firstString(item.size, item.packSize) ?? productSize(item.unitOfSize),
+    description: firstString(item.description),
+  };
+}
+
+function productSize(value: unknown): string | undefined {
+  const unit = asRecord(value);
+  const size = typeof unit.size === 'number' && Number.isFinite(unit.size) && unit.size > 0 ? unit.size : undefined;
+  const abbreviation = firstString(unit.abbreviation);
+  return size !== undefined && abbreviation ? `${size} ${abbreviation}` : undefined;
+}
+
+function field(record: Record<string, unknown>, name: string): unknown {
+  const expected = name.toLowerCase();
+  return Object.entries(record).find(([key]) => key.toLowerCase() === expected)?.[1];
+}
+
+function normalizedStoreId(value: unknown): string {
+  const storeId = firstString(value);
+  if (!storeId) throw new ProviderInputError('SuperValu Ireland', 'storeId must be a non-empty string');
+  return storeId;
+}
+
+function normalizedModes(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const modes = new Set<string>();
+  for (const candidate of value) {
+    const record = asRecord(candidate);
+    const mode = firstString(candidate, field(record, 'name'), field(record, 'mode'));
+    if (mode) modes.add(mode.toLowerCase());
+  }
+  return modes.size > 0 ? [...modes] : undefined;
+}
+
+function gatewayStore(item: Record<string, unknown>): Store | undefined {
+  const storeId = firstString(field(item, 'retailerStoreId'));
+  const name = firstString(field(item, 'name'));
+  if (!storeId || !name) return undefined;
+
+  const location = asRecord(field(item, 'location'));
+  const latitude = firstNumber(field(location, 'latitude'), field(item, 'latitude'));
+  const longitude = firstNumber(field(location, 'longitude'), field(item, 'longitude'));
+  const address = [
+    field(item, 'addressLine1'),
+    field(item, 'addressLine2'),
+    field(item, 'addressLine3'),
+    field(item, 'city'),
+    field(item, 'countyProvinceState'),
+    field(item, 'country'),
+  ]
+    .map((value) => firstString(value))
+    .filter((value): value is string => value !== undefined)
+    .join(', ');
+
+  return {
+    store_id: storeId,
+    name,
+    status: firstString(field(item, 'status'))?.toLowerCase(),
+    currency: firstString(field(item, 'currency'))?.toUpperCase(),
+    postcode: firstString(field(item, 'postCode'), field(item, 'postcode'))?.toUpperCase(),
+    address: address || undefined,
+    location:
+      latitude !== undefined && longitude !== undefined &&
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
+        ? { latitude, longitude }
+        : undefined,
+    shopping_modes: normalizedModes(field(item, 'shoppingModes')),
+  };
+}
+
+function normalizedSearchText(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function requireSearchableStoreFilter(value: string, name: string): string {
+  const filter = requireQuery(value);
+  if (!normalizedSearchText(filter)) {
+    throw new ProviderInputError('SuperValu Ireland', `${name} must contain searchable characters`);
+  }
+  return filter;
+}
+
+function storeMatches(store: Store, fullTextSearch?: string, postcode?: string): boolean {
+  if (fullTextSearch) {
+    const query = normalizedSearchText(fullTextSearch);
+    const haystack = normalizedSearchText(
+      [store.name, store.address, store.postcode].filter(Boolean).join(' ')
+    );
+    const compactPostcode = normalizedSearchText(store.postcode ?? '').replace(/ /g, '');
+    if (!query.split(' ').every(term => haystack.includes(term)) && !compactPostcode.includes(query.replace(/ /g, ''))) return false;
+  }
+  if (postcode) {
+    const expected = normalizedSearchText(postcode).replace(/ /g, '');
+    const actual = normalizedSearchText(store.postcode ?? '').replace(/ /g, '');
+    if (!actual.startsWith(expected)) return false;
+  }
+  return true;
+}
+
+function nearbyStoreOptions(options: StoreSearchOptions): {
+  limit: number;
+  offset: number;
+  retailerStoreId?: string;
+  fullTextSearch?: string;
+  postcode?: string;
+  latitude?: number;
+  longitude?: number;
+  range?: number;
+  shoppingMode?: 'pickup' | 'delivery';
+} {
+  const limit = clampLimit(options.limit, STORE_LOOKUP_LIMIT, STORE_LOOKUP_MAX);
+  const offset = clampOffset(options.offset);
+  const fullTextSearch = options.fullTextSearch === undefined
+    ? undefined
+    : requireSearchableStoreFilter(options.fullTextSearch, 'fullTextSearch');
+  const postcode = options.postcode === undefined
+    ? undefined
+    : requireSearchableStoreFilter(options.postcode, 'postcode');
+  const retailerStoreId =
+    options.retailerStoreId === undefined
+      ? undefined
+      : normalizedStoreId(options.retailerStoreId);
+  const coordinatesSpecified =
+    options.latitude !== undefined || options.longitude !== undefined;
+  if (!coordinatesSpecified) {
+    if (options.range !== undefined) throw new ProviderInputError('SuperValu Ireland', 'range requires both latitude and longitude');
+    if (options.shoppingMode !== undefined) {
+      throw new ProviderInputError('SuperValu Ireland', 'shoppingMode requires both latitude and longitude');
+    }
+    return { limit, offset, retailerStoreId, fullTextSearch, postcode };
+  }
+  if (retailerStoreId) {
+    throw new ProviderInputError('SuperValu Ireland', 'retailerStoreId cannot be combined with coordinates');
+  }
+  if (fullTextSearch) {
+    throw new ProviderInputError('SuperValu Ireland', 'fullTextSearch cannot be combined with coordinates');
+  }
+  if (postcode) {
+    throw new ProviderInputError('SuperValu Ireland', 'postcode cannot be combined with coordinates');
+  }
+  if (offset > 0) {
+    throw new ProviderInputError('SuperValu Ireland', 'offset cannot be combined with coordinates');
+  }
+  if (
+    !Number.isFinite(options.latitude) ||
+    !Number.isFinite(options.longitude) ||
+    options.latitude === undefined ||
+    options.longitude === undefined ||
+    options.latitude < -90 ||
+    options.latitude > 90 ||
+    options.longitude < -180 ||
+    options.longitude > 180
+  ) {
+    throw new ProviderInputError('SuperValu Ireland', 'latitude and longitude must be valid coordinates');
+  }
+  const range = options.range ?? DEFAULT_NEARBY_RANGE_KM;
+  if (!Number.isFinite(range) || range <= 0) {
+    throw new ProviderInputError('SuperValu Ireland', 'range must be a positive number of kilometres');
+  }
+  if (options.shoppingMode !== undefined && options.shoppingMode !== 'pickup' && options.shoppingMode !== 'delivery') {
+    throw new ProviderInputError('SuperValu Ireland', 'shoppingMode must be pickup or delivery');
+  }
+  return {
+    limit,
+    offset,
+    retailerStoreId,
+    fullTextSearch,
+    postcode,
+    latitude: options.latitude,
+    longitude: options.longitude,
+    range,
+    shoppingMode: options.shoppingMode ?? 'delivery',
+  };
+}
+
+// Node clamps larger setTimeout delays to 1 ms.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export class SuperValuIrelandProvider implements GroceryProvider {
+  readonly name = 'supervalu-ie';
+  private storeId?: string;
+  private readonly verifiedStoreIds = new Set<string>();
+  private readonly requestTimeoutMs: number;
+  private readonly storeLookupTimeoutMs: number;
+  private readonly cookieHeader?: string;
+  private readonly fetcher: FetchLike;
+  private readonly gatewayBase: string;
+
+  constructor(options: SuperValuIrelandOptions = {}) {
+    this.storeId = options.storeId;
+    this.cookieHeader =
+      options.cookieHeader ?? env('SUPERMARKET_SUPERVALU_COOKIE_HEADER');
+    this.fetcher = options.fetcher ?? fetch;
+    this.gatewayBase = options.gatewayBase ?? GATEWAY_BASE;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 10000;
+    this.storeLookupTimeoutMs = options.storeLookupTimeoutMs ?? 30000;
+    for (const value of [this.requestTimeoutMs, this.storeLookupTimeoutMs]) {
+      if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+        throw new ProviderInputError('SuperValu Ireland', `timeout must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}`);
+      }
+    }
+  }
+
+  async search(query: string, options: SearchOptions = {}): Promise<Product[]> {
+    const requestedStoreId = options.storeId ?? this.storeId;
+    if (!requestedStoreId) {
+      throw new ProviderInputError('SuperValu Ireland',
+        'SuperValu Ireland requires an explicit store id. Use --store-id or store_id.'
+      );
+    }
+    if (options.category !== undefined) throw new ProviderInputError('SuperValu Ireland', 'SuperValu Ireland does not support category filters');
+    const normalizedQuery = requireQuery(query);
+    const limit = clampLimit(options.limit, 10, 50);
+    const offset = clampOffset(options.offset);
+    const selectedStoreId = normalizedStoreId(requestedStoreId);
+    if (!this.verifiedStoreIds.has(selectedStoreId)) {
+      await this.validateSelectedStore(selectedStoreId);
+      this.verifiedStoreIds.add(selectedStoreId);
+    }
+    const url = new URL(
+      `${this.gatewayBase.replace(/\/$/, '')}/stores/${encodeURIComponent(selectedStoreId)}/search`
+    );
+    url.searchParams.set('q', normalizedQuery);
+    url.searchParams.set('take', String(limit));
+    url.searchParams.set('skip', String(offset));
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Origin: BASE_URL,
+      Referer: `${BASE_URL}/`,
+      'Accept-Language': 'en-IE,en;q=0.9',
+      'X-Site-Host': BASE_URL,
+      'X-Shopping-Mode': SHOPPING_MODE_IDS.delivery,
+    };
+    if (this.cookieHeader) headers.Cookie = this.cookieHeader;
+
+    const payload = await this.requestJson(url, { headers }, 'SuperValu Ireland');
+    const root = asRecord(payload);
+    const branches = ['items', 'products', 'results'] as const;
+    const presentBranches = branches.filter((candidate) =>
+      Object.prototype.hasOwnProperty.call(root, candidate)
+    );
+    const malformedBranch = presentBranches.find(
+      (candidate) => !Array.isArray(root[candidate])
+    );
+    if (malformedBranch) {
+      requireRecordArray(
+        root[malformedBranch],
+        'SuperValu Ireland',
+        `${malformedBranch} collection`
+      );
+    }
+    const branch =
+      branches.find(
+        (candidate) => Array.isArray(root[candidate]) && root[candidate].length > 0
+      ) ?? presentBranches[0];
+    if (!branch) {
+      throw new ProviderProtocolError(
+        'SuperValu Ireland',
+        'missing or malformed product collection'
+      );
+    }
+    const source = root[branch];
+    const rows = requireRecordArray(
+      source,
+      'SuperValu Ireland',
+      `${branch} collection`
+    );
+    const products = rows
+      .map(mapProduct)
+      .filter((product): product is Product => product !== undefined);
+    if (Array.isArray(source) && source.length > 0 && products.length === 0) {
+      throw new ProviderProtocolError(
+        'SuperValu Ireland',
+        `${branch} collection contained no valid products`
+      );
+    }
+    return products.slice(0, limit);
+  }
+
+  async listStores(options: StoreSearchOptions = {}): Promise<Store[]> {
+    const selection = nearbyStoreOptions(options);
+    const base = this.gatewayBase.replace(/\/$/, '');
+    const url =
+      selection.latitude === undefined
+        ? new URL(`${base}/stores`)
+        : new URL(
+            `${base}/near/${selection.latitude}/${selection.longitude}/${selection.range}/${selection.limit}/stores`
+          );
+    const localFilter =
+      selection.fullTextSearch !== undefined || selection.postcode !== undefined;
+    if (selection.latitude === undefined) {
+      url.searchParams.set('Take', String(localFilter ? STORE_LOOKUP_MAX : selection.limit));
+      if (!localFilter && selection.offset > 0) {
+        url.searchParams.set('Skip', String(selection.offset));
+      }
+      if (selection.retailerStoreId) {
+        url.searchParams.set('RetailerStoreId', selection.retailerStoreId);
+      }
+    } else {
+      url.searchParams.set('shoppingModeId', SHOPPING_MODE_IDS[selection.shoppingMode!]);
+    }
+
+    const deadline = Date.now() + this.storeLookupTimeoutMs;
+    const stores: Store[] = [];
+    const seenPages = new Set<string>();
+    const seenStoreIds = new Set<string>();
+    let skip = 0;
+    let pageCount = 0;
+    let expectedTotal: number | undefined;
+    while (true) {
+      if (pageCount >= MAX_STORE_PAGES) {
+        throw new ProviderProtocolError(
+          'SuperValu Ireland stores',
+          `pagination exceeded ${MAX_STORE_PAGES} pages`
+        );
+      }
+      pageCount += 1;
+      const pageUrl = new URL(url);
+      if (selection.latitude === undefined && localFilter && skip > 0) {
+        pageUrl.searchParams.set('Skip', String(skip));
+      }
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('SuperValu Ireland stores lookup timed out');
+      const payload = await this.requestJson(pageUrl, { headers: { Accept: 'application/json' } }, 'SuperValu Ireland stores', Math.min(this.requestTimeoutMs, remaining));
+      const root = asRecord(payload);
+      const source = field(root, 'items');
+      const rows = requireRecordArray(source, 'SuperValu Ireland stores', 'items collection');
+      const sourceCount = Array.isArray(source) ? source.length : 0;
+      const pageStores = rows
+        .map(gatewayStore)
+        .filter((store): store is Store => store !== undefined);
+      if (Array.isArray(source) && source.length > 0 && pageStores.length === 0) {
+        throw new ProviderProtocolError(
+          'SuperValu Ireland stores',
+          'items collection contained no valid stores'
+        );
+      }
+      if (pageStores.length > 0) {
+        const signature = pageStores.map((store) => store.store_id).join('\u0000');
+        if (seenPages.has(signature)) {
+          throw new ProviderProtocolError(
+            'SuperValu Ireland stores',
+            'pagination repeated a page'
+          );
+        }
+        seenPages.add(signature);
+      }
+      stores.push(...pageStores);
+      const total = firstNumber(field(root, 'total'));
+      if (localFilter) {
+        if (!Number.isInteger(total) || total! < 0) {
+          throw new ProviderProtocolError(
+            'SuperValu Ireland stores',
+            'pagination total must be a non-negative integer'
+          );
+        }
+        if (expectedTotal === undefined) expectedTotal = total;
+        else if (total !== expectedTotal) {
+          throw new ProviderProtocolError(
+            'SuperValu Ireland stores',
+            'pagination total changed between pages'
+          );
+        }
+        for (const store of pageStores) {
+          if (seenStoreIds.has(store.store_id)) {
+            throw new ProviderProtocolError(
+              'SuperValu Ireland stores',
+              'pagination returned overlapping store ids'
+            );
+          }
+          seenStoreIds.add(store.store_id);
+        }
+        const received = skip + sourceCount;
+        if (received > expectedTotal!) {
+          throw new ProviderProtocolError(
+            'SuperValu Ireland stores',
+            'pagination total is smaller than received records'
+          );
+        }
+        if (sourceCount === 0 && received < expectedTotal!) {
+          throw new ProviderProtocolError(
+            'SuperValu Ireland stores',
+            'pagination ended before the declared total'
+          );
+        }
+      }
+      const matchingCount = stores.filter(store =>
+        (!selection.retailerStoreId || store.store_id === selection.retailerStoreId) &&
+        storeMatches(store, selection.fullTextSearch, selection.postcode)
+      ).length;
+      if (
+        (localFilter && matchingCount >= selection.offset + selection.limit) ||
+        !localFilter ||
+        selection.latitude !== undefined ||
+        sourceCount === 0 ||
+        skip + sourceCount >= expectedTotal!
+      ) {
+        break;
+      }
+      skip += sourceCount;
+    }
+
+    if (
+      selection.retailerStoreId &&
+      selection.offset === 0 &&
+      selection.latitude === undefined &&
+      !localFilter &&
+      !stores.some((store) => store.store_id === selection.retailerStoreId)
+    ) {
+      throw new ProviderInputError('SuperValu Ireland',
+        `SuperValu Ireland retailer store ${selection.retailerStoreId} was not found`
+      );
+    }
+    const filtered = stores.filter((store) =>
+      (!selection.retailerStoreId || store.store_id === selection.retailerStoreId) &&
+      storeMatches(store, selection.fullTextSearch, selection.postcode)
+    );
+    const offset = localFilter || selection.latitude !== undefined ? selection.offset : 0;
+    return filtered.slice(offset, offset + selection.limit);
+  }
+
+  private async requestJson(url: URL, init: RequestInit, provider: string, timeoutMs = this.requestTimeoutMs): Promise<unknown> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`${provider} request timed out after ${timeoutMs} ms`));
+        controller.abort();
+      }, timeoutMs);
+    });
+    try {
+      return await Promise.race([
+        (async () => jsonResponse<unknown>(await this.fetcher(url, {...init, signal: controller.signal}), provider))(),
+        timeout,
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async validateSelectedStore(storeId: string): Promise<void> {
+    const stores = await this.listStores({ retailerStoreId: storeId, limit: 1 });
+    const store = stores.find(candidate => candidate.store_id === storeId)!;
+    if (store.currency !== undefined && store.currency !== 'EUR') {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} uses unsupported currency ${store.currency}`);
+    }
+    if (store.status !== undefined && store.status !== 'active') {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} is not active (${store.status})`);
+    }
+    if (store.shopping_modes !== undefined && !store.shopping_modes.some((mode) => mode.includes('delivery'))) {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} does not offer the delivery catalogue used by search`);
+    }
+  }
+
+  async selectStore(storeId: string): Promise<void> {
+    const selectedStoreId = normalizedStoreId(storeId);
+    await this.validateSelectedStore(selectedStoreId);
+    this.storeId = selectedStoreId;
+    this.verifiedStoreIds.add(selectedStoreId);
+  }
+}
