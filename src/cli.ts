@@ -8,6 +8,7 @@ import {
   countries as knownCountries,
   providersFor,
   createProvider,
+  assertCapability,
 } from './providers/registry';
 import type { Capability } from './providers/types';
 import { money } from './format';
@@ -36,7 +37,8 @@ program
   .name(invokedAs.startsWith('groc') ? invokedAs : 'supermarket')
   .description("One command line for the world's supermarkets. Built for agents.")
   .version('3.0.0')
-  .option('-p, --provider <name>', 'Provider id (see `supermarket providers`)', 'sainsburys');
+  .option('-p, --provider <name>', 'Provider id (see `supermarket providers`)', 'sainsburys')
+  .option('--store-id <id>', 'Retailer store id for local pricing and availability');
 
 // Parse a string as a positive integer, or throw
 function parsePositiveInt(value: string, name: string): number {
@@ -170,24 +172,29 @@ program
   .option('--json', 'Output as JSON')
   .action(async (query, options, cmd) => {
     try {
-      const limit = parsePositiveInt(options.limit, 'limit');
+      const limit = Number(options.limit);
+      if (!/^\d+$/.test(options.limit) || !Number.isSafeInteger(limit) || limit < 1) {
+        throw new Error(`limit must be a positive integer, got "${options.limit}"`);
+      }
       const globals = cmd.optsWithGlobals();
 
       // `--country` picks the first search-capable provider there, unless a
       // provider was named explicitly. This is what makes `search --country NL`
       // work without the user knowing which chains exist in the Netherlands.
-      let provider;
-      if (options.country && !cmd.args.includes('--provider')) {
+      let providerId: string;
+      if (options.country && cmd.getOptionValueSourceWithGlobals('provider') !== 'cli') {
         const country = resolveCountry(options.country);
         const [first] = providersFor(country, 'search');
-        provider = await createProvider(first.id);
+        providerId = first.id;
       } else {
-        provider = await createProvider(globals.provider);
+        providerId = globals.provider;
       }
 
-      // Batch mode: thirty queries in one invocation instead of thirty.
+      // Validate and capability-check the store before any provider code loads.
+      const { prepareStoreId, selectStoreForSearch, requireSearchQuery, validateBatchSearchQueries } = await import('./stores');
+      let queries: import('./batch').BatchQuery[] | undefined;
       if (options.batch) {
-        const { batchSearch, parseBatchInput } = await import('./batch');
+        const { parseBatchInput } = await import('./batch');
         const raw =
           options.batch === '-'
             ? require('fs').readFileSync(0, 'utf-8')
@@ -197,11 +204,34 @@ program
                   : options.batch,
                 'utf-8'
               );
-        const queries = parseBatchInput(raw);
-        const results = await batchSearch(provider, queries, { limit });
+        queries = parseBatchInput(raw);
+        validateBatchSearchQueries(queries);
+      } else {
+        requireSearchQuery(query);
+      }
+      const storeId = prepareStoreId(providerId, globals.storeId);
+      const createSearchProvider = async () => {
+        const provider = await createProvider(providerId);
+        // Select once, after caller input is valid and before any search.
+        if (storeId) await selectStoreForSearch(providerId, provider, storeId);
+        return provider;
+      };
+      const scope = storeId ? { storeId } : {};
+
+      // Batch mode: thirty queries in one invocation instead of thirty.
+      if (queries) {
+        const { batchSearch } = await import('./batch');
+        const provider = await createSearchProvider();
+        const results = await batchSearch(provider, queries, { limit, ...scope });
 
         if (options.json !== false) {
-          console.log(JSON.stringify({ provider: provider.name, results }, null, 2));
+          console.log(JSON.stringify(
+            storeId
+              ? { provider: provider.name, store_id: storeId, results }
+              : { provider: provider.name, results },
+            null,
+            2
+          ));
           return;
         }
         for (const r of results) {
@@ -214,7 +244,8 @@ program
         return;
       }
 
-      let products: any[] = await provider.search(query, { limit });
+      const provider = await createSearchProvider();
+      let products: any[] = await provider.search(query, { limit, ...scope });
 
       if (options.enrich) {
         const { enrich } = await import('./enrich/openfoodfacts');
@@ -222,11 +253,11 @@ program
       }
 
       if (options.json) {
-        console.log(JSON.stringify({ products }, null, 2));
+        console.log(JSON.stringify(storeId ? { store_id: storeId, products } : { products }, null, 2));
         return;
       }
 
-      console.log(`\n🔍 Search results from ${provider.name}: "${query}"\n`);
+      console.log(`\n🔍 Search results from ${provider.name}${storeId ? ` store ${storeId}` : ''}: "${query}"\n`);
       printProducts(products);
 
       if (options.enrich) {
@@ -751,7 +782,7 @@ program
       return;
     }
 
-    const CAPS: Capability[] = ['search', 'basket', 'slots', 'checkout', 'orders'];
+    const CAPS: Capability[] = ['search', 'stores', 'basket', 'slots', 'checkout', 'orders'];
     const width = Math.max(...manifests.map((m) => m.label.length), 8);
 
     console.log(
@@ -770,6 +801,57 @@ program
       console.log(`  ${m.label.padEnd(width)}${marks} ${m.auth}${tier}`);
     }
     console.log(`\n  ${manifests.length} provider(s). Enrichment via Open Food Facts works everywhere.\n`);
+  });
+
+// Store lookup, for providers that price and stock per store.
+program
+  .command('stores')
+  .description('Find retailer stores for store-scoped search (providers with the "stores" capability)')
+  .option('--query <text>', 'Retailer text search, where supported')
+  .option('--postcode <code>', 'Retailer postcode filter, where supported')
+  .option('--latitude <number>', 'Latitude for a nearby search (use with --longitude)')
+  .option('--longitude <number>', 'Longitude for a nearby search (use with --latitude)')
+  .option('--range <km>', 'Nearby search radius in kilometres')
+  .option('--mode <mode>', 'Shopping mode: pickup or delivery')
+  .option('-l, --limit <number>', 'Max results', '10')
+  .option('--json', 'Output as JSON')
+  .action(async (options, cmd) => {
+    try {
+      const globals = cmd.optsWithGlobals();
+      const { assertStoresSupported, listProviderStores, parseStoreSearchOptions } =
+        await import('./stores');
+      // Validate input and capability before loading provider code.
+      const storeOptions = parseStoreSearchOptions({
+        query: options.query,
+        postcode: options.postcode,
+        latitude: options.latitude,
+        longitude: options.longitude,
+        range: options.range,
+        mode: options.mode,
+        limit: options.limit,
+        storeId: globals.storeId,
+      });
+      assertStoresSupported(globals.provider);
+      const provider = await createProvider(globals.provider);
+      const stores = await listProviderStores(globals.provider, provider, storeOptions);
+
+      if (options.json) {
+        console.log(JSON.stringify({ provider: globals.provider, stores }, null, 2));
+        return;
+      }
+      console.log(`\n🏪 Stores from ${provider.name}\n`);
+      if (stores.length === 0) console.log('No stores found.\n');
+      stores.forEach((s, i) => {
+        console.log(`${i + 1}. ${s.name}`);
+        const place = [s.address, s.postcode].filter(Boolean).join(', ');
+        if (place) console.log(`   ${place}`);
+        if (s.shopping_modes?.length) console.log(`   Modes: ${s.shopping_modes.join(', ')}`);
+        console.log(`   Store ID: ${s.store_id}\n`);
+      });
+    } catch (error: any) {
+      console.error('❌ Store lookup failed:', explain(error, { provider: cmd?.optsWithGlobals?.().provider ?? program.opts().provider, action: 'store lookup' }));
+      process.exit(1);
+    }
   });
 
 // ─────────────────────────────────────────────────────────
@@ -929,5 +1011,31 @@ program
       process.exit(1);
     }
   });
+
+// Refuse a store scope that the selected command cannot honor before its action runs.
+program.hook('preAction', (_program, command) => {
+  if (command.optsWithGlobals().storeId !== undefined &&
+      !['search', 'stores'].includes(command.name())) {
+    console.error(`--store-id is only supported by search and stores, not ${command.name()}.`);
+    process.exit(1);
+  }
+  const capabilityByCommand: Record<string, Capability> = {
+    basket: 'basket', add: 'basket', remove: 'basket', update: 'basket', clear: 'basket',
+    slots: 'slots', book: 'slots', checkout: 'checkout', orders: 'orders',
+  };
+  const capability = capabilityByCommand[command.name()];
+  if (capability) {
+    const provider = command.optsWithGlobals().provider;
+    try {
+      if (command.name() === 'book' && provider === 'ocado') {
+        throw new Error('ocado does not support slot booking; only slot reads are available.');
+      }
+      assertCapability(provider, capability);
+    } catch (error) {
+      console.error(explain(error, { provider, action: command.name() }));
+      process.exit(1);
+    }
+  }
+});
 
 program.parse();

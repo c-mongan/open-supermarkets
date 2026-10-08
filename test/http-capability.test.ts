@@ -3,7 +3,6 @@ import http from 'node:http';
 import { ProviderFactory } from '../src/providers';
 
 async function main() {
-  const originalListen = http.Server.prototype.listen;
   const originalCreate = ProviderFactory.create;
   let server: http.Server | undefined;
   let constructions = 0;
@@ -12,11 +11,8 @@ async function main() {
       constructions++;
       throw new Error('Unexpected legacy construction');
     }) as typeof ProviderFactory.create;
-    http.Server.prototype.listen = function () {
-      server = this;
-      return originalListen.call(this, 0, '127.0.0.1');
-    } as typeof originalListen;
-    require('../src/http-server');
+    server = require('../src/http-server').createHttpServer();
+    server!.listen(0, '127.0.0.1');
     if (!server!.listening) await new Promise<void>(resolve => server!.once('listening', resolve));
     const address = server!.address();
     assert.ok(address && typeof address !== 'string');
@@ -40,7 +36,6 @@ async function main() {
     console.log('  ✓ HTTP unsupported operations fail before provider construction');
   } finally {
     ProviderFactory.create = originalCreate;
-    http.Server.prototype.listen = originalListen;
     if (server) await new Promise<void>((resolve, reject) => server!.close(error => error ? reject(error) : resolve()));
   }
 }

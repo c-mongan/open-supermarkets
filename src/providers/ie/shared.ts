@@ -1,3 +1,5 @@
+export { ProviderInputError } from '../../provider-errors';
+
 export type FetchLike = (
   input: string | URL | Request,
   init?: RequestInit
