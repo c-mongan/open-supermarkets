@@ -79,6 +79,17 @@ export const PROVIDERS: ProviderManifest[] = [
       'Protocol reimplemented from AviBackToBlack/lidaldi and but3k4/supermarket-mcp (MIT)',
     load: async () => (await import('./aldi-ie')).AldiIrelandProvider,
   },
+  {
+    id: 'dunnes-ie',
+    label: 'Dunnes Stores Ireland',
+    country: 'IE',
+    capabilities: ['search', 'stores'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol research from but3k4/supermarket-mcp (MIT), independently verified against the Irish grocery gateway',
+    load: async () => (await import('./dunnes-ie')).DunnesIrelandProvider,
+  },
 
   // ── Netherlands ──────────────────────────────────────────────────────
   {
