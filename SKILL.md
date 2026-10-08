@@ -1,13 +1,13 @@
 ---
 name: open-supermarkets
-description: "Grocery automation across nine retailers in five countries — UK, Netherlands, Belgium, Spain and the US. Search, compare, basket, delivery slots and checkout, plus Open Food Facts nutrition and allergen enrichment. Available as CLI, MCP server, or agent skill."
+description: "Grocery automation across ten retailers in seven countries — UK, Netherlands, Belgium, Spain, Hungary, the US and Canada. Search, compare, basket, delivery slots and checkout, plus Open Food Facts nutrition and allergen enrichment. Available as CLI, MCP server, or agent skill."
 license: MIT
 compatibility: Node.js 18+, TypeScript. Playwright only for browser-auth providers. Delivery areas vary by retailer.
 metadata:
   author: zish
   version: "3.0.0"
   repository: https://github.com/abracadabra50/open-supermarkets
-  tags: [groceries, supermarket, sainsburys, ocado, tesco, albert-heijn, mercadona, kroger, instacart, uk, netherlands, belgium, spain, usa, shopping, automation, mcp, agent-tool]
+  tags: [groceries, supermarket, sainsburys, ocado, tesco, tesco-hu, hungary, albert-heijn, mercadona, kroger, instacart, uk, netherlands, belgium, spain, usa, shopping, automation, mcp, agent-tool]
 allowed-tools: Bash({baseDir}/node:*), Bash(supermarket:*), Bash(npm:run:supermarket:*)
 ---
 
@@ -28,6 +28,7 @@ Each supermarket has a dedicated skill file with provider-specific commands, aut
 | **Sainsbury's** | [`skills/sainsburys.md`](skills/sainsburys.md) | Full coverage |
 | **Tesco** | [`skills/tesco.md`](skills/tesco.md) | Full coverage + staples |
 | **Ocado** | [`skills/ocado.md`](skills/ocado.md) | Full coverage except slot booking/checkout (AWS WAF) |
+| **Tesco Magyarország** | [`skills/tesco-hu.md`](skills/tesco-hu.md) | Search and basket; no slots/checkout |
 
 ---
 
@@ -125,6 +126,25 @@ Trigger when users:
 - Need to manage a shopping basket
 - Want to book delivery slots or checkout
 - Ask about weekly shop, meal prep, or grocery budget
+
+---
+
+## Product Availability
+
+Search results use three stock states. JSON uses `in_stock`; lean batch search
+uses `inStock`. Both fields have the same meaning:
+
+| Value | Meaning | Agent action |
+|-------|---------|--------------|
+| `true` | In stock | Treat as available according to the retailer's signal |
+| `false` | Explicitly out of stock | Offer alternatives |
+| `null` | Retailer did not provide a reliable signal | Report stock as unknown and ask the user to check with the retailer |
+
+Use strict checks (`=== true`, `=== false`, `=== null`). Do not treat a falsy
+value as proof that a product is out of stock. Filtering with `=== true` selects
+only confirmed available products; excluded products can be unavailable or unknown.
+Lidl Ireland supports search only, so catalogue results cannot be added to a basket
+or checked out through this provider.
 
 ---
 

@@ -55,6 +55,19 @@ export const PROVIDERS: ProviderManifest[] = [
     load: async () => (await import('./tesco/index')).TescoProvider,
   },
 
+  // ── Ireland ──────────────────────────────────────────────────────────
+  {
+    id: 'lidl-ie',
+    label: 'Lidl Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
+    load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
+  },
+
   // ── Netherlands ──────────────────────────────────────────────────────
   {
     id: 'ah',
@@ -91,6 +104,35 @@ export const PROVIDERS: ProviderManifest[] = [
     maintainer: 'abracadabra50',
     credit: 'Open REST catalogue + the storefront\'s public Algolia search key',
     load: async () => (await import('./mercadona')).MercadonaProvider,
+  },
+  {
+    id: 'ahorramas',
+    label: 'AhorraMás',
+    country: 'ES',
+    capabilities: ['search'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'vgvr0',
+    credit:
+      'Salesforce Commerce Cloud storefront using anonymous server-rendered catalogue pages',
+    load: async () => (await import('./ahorramas')).AhorramasProvider,
+  },
+
+  // ── Hungary ──────────────────────────────────────────────────────────
+  {
+    id: 'tesco-hu',
+    label: 'Tesco Magyarország',
+    country: 'HU',
+    // Basket verified live on 2026-09-17 with an imported browser session
+    // (add one item, read it back, remove it, totals restored).
+    capabilities: ['search', 'basket'],
+    auth: 'session-cookie',
+    tier: 'community',
+    maintainer: 'benedek',
+    credit:
+      'Same xapi.tesco.com GraphQL backend as the UK provider, selected by region/language headers; ' +
+      'schema differences learned from the storefront\'s server-rendered Apollo cache',
+    load: async () => (await import('./tesco-hu/index')).TescoHuProvider,
   },
 
   // ── United States ────────────────────────────────────────────────────

@@ -56,7 +56,7 @@ function getProvider(options: any) {
 
 function printProducts(products: any[]) {
   products.forEach((p, i) => {
-    const stock = p.in_stock ? '✅' : '❌';
+    const stock = p.in_stock === true ? '✅' : p.in_stock === false ? '❌' : 'stock unknown';
     const rating = p.rating ? ` ${p.rating}★ (${p.review_count ?? 0})` : '';
     const size = p.size ? ` / ${p.size}` : '';
     const unit = p.unit_price?.price
@@ -118,9 +118,12 @@ program
     try {
       const providerName = cmd.optsWithGlobals().provider;
       const provider = getProvider(cmd.optsWithGlobals());
-      const sessionInfo = providerName === 'tesco'
-        ? (await import('./providers/tesco/auth')).getSessionInfo()
-        : undefined;
+      const sessionInfo =
+        providerName === 'tesco'
+          ? (await import('./providers/tesco/auth')).getSessionInfo()
+          : providerName === 'tesco-hu'
+            ? (await import('./providers/tesco-hu/session')).getSessionInfo()
+            : undefined;
       const authenticated = await provider.isAuthenticated();
 
       const result = {
@@ -147,7 +150,7 @@ program
       }
 
       if (!authenticated) {
-        console.log('\n💡 Refresh with `supermarket login` or import browser cookies with `supermarket --provider tesco import-session --file <cookies.json>`.');
+        console.log(`\n💡 Refresh with \`supermarket login\` or import browser cookies with \`supermarket --provider ${providerName} import-session --file <cookies.json>\`.`);
       }
       console.log();
     } catch (error: any) {
@@ -179,7 +182,7 @@ program
         const [first] = providersFor(country, 'search');
         provider = await createProvider(first.id);
       } else {
-        provider = getProvider(globals);
+        provider = await createProvider(globals.provider);
       }
 
       // Batch mode: thirty queries in one invocation instead of thirty.
@@ -795,7 +798,7 @@ program
 // Tesco: import session from Chrome cookie export
 program
   .command('import-session')
-  .description('Tesco/Ocado — import a browser session (cookie file, or a raw Cookie header)')
+  .description('Tesco/Tesco HU/Ocado — import a browser session (cookie file, or a raw Cookie header)')
   .option('--file <path>', 'Cookies JSON (Chrome DevTools, Cookie-Editor, or Playwright storage_state)')
   .option('--header <cookie>', 'Raw Cookie request header, copied from DevTools → Network')
   .option('--stdin', 'Read a raw Cookie header from stdin (avoids it landing in shell history)')
@@ -808,15 +811,21 @@ program
       // document.cookie it includes HttpOnly cookies — which is all of the ones that
       // matter here.
       if (options.header || options.stdin) {
-        if (providerName !== 'tesco') {
-          console.error('❌ --header is currently Tesco only.');
+        if (providerName !== 'tesco' && providerName !== 'tesco-hu') {
+          console.error('❌ --header is currently available for --provider tesco and --provider tesco-hu.');
           process.exit(1);
         }
         const header = options.stdin
           ? require('fs').readFileSync(0, 'utf-8')
           : options.header;
-        const { importSessionFromHeader } = await import('./providers/tesco/import-session');
-        importSessionFromHeader(header);
+        if (providerName === 'tesco-hu') {
+          const { importSessionFromHeader, SESSION_FILE } = await import('./providers/tesco-hu/session');
+          const session = importSessionFromHeader(header);
+          console.log(`✅ Imported ${session.cookies.length} cookies from header — tesco-hu session saved to ${SESSION_FILE}, valid until ${session.expiresAt}`);
+        } else {
+          const { importSessionFromHeader } = await import('./providers/tesco/import-session');
+          importSessionFromHeader(header);
+        }
         return;
       }
 
@@ -831,8 +840,12 @@ program
       } else if (providerName === 'ocado') {
         const { importSession } = await import('./providers/ocado');
         importSession(options.file);
+      } else if (providerName === 'tesco-hu') {
+        const { importSession, SESSION_FILE } = await import('./providers/tesco-hu/session');
+        const session = importSession(options.file);
+        console.log(`✅ Imported ${session.cookies.length} cookies — tesco-hu session saved to ${SESSION_FILE}, valid until ${session.expiresAt}`);
       } else {
-        console.error('❌ The import-session command is only available for --provider tesco or --provider ocado');
+        console.error('❌ The import-session command is only available for --provider tesco, tesco-hu or ocado');
         process.exit(1);
       }
     } catch (error: any) {

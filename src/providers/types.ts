@@ -11,7 +11,8 @@ export interface Product {
     measure: string;
     price: number;
   };
-  in_stock: boolean;
+  /** Unknown when the retailer supplies no reliable stock signal. */
+  in_stock: boolean | null;
   image_url?: string;
   provider: string; // sainsburys, ocado, tesco, etc.
   /**
@@ -40,6 +41,8 @@ export interface Basket {
   total_quantity: number;
   total_cost: number;
   provider: string;
+  /** ISO 4217. Absent means GBP, like Product.currency. Non-UK providers must set it. */
+  currency?: string;
 }
 
 export interface DeliverySlot {
