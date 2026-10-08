@@ -92,6 +92,10 @@ check('missing capability fails loudly', () => {
   assert.throws(() => registry.assertCapability('ah', 'checkout'), /does not support/);
 });
 
+check('Aldi preserves Lidl as the Ireland default search provider', () => {
+  assert.equal(registry.providersFor('IE', 'search')[0].id, 'lidl-ie');
+});
+
 check('providersFor explains an empty country rather than returning []', () => {
   assert.throws(() => registry.providersFor('ZZ'), /Countries covered/);
 });
@@ -274,6 +278,20 @@ console.log('\nregistry/factory parity');
       [],
       `these are in the registry but unreachable via --provider: ${broken.join(', ')}`
     );
+  });
+
+  check('Aldi uses the async provider contract with truthful capabilities', async () => {
+    const manifest = PROVIDERS.find((m: any) => m.id === 'aldi-ie');
+    assert.ok(manifest);
+    assert.deepStrictEqual(manifest.capabilities, ['search', 'stores']);
+    assert.throws(() => ProviderFactory.create('aldi-ie'), /no synchronous constructor/);
+    const { createProvider } = require('../src/providers');
+    const provider = await createProvider('aldi-ie');
+    assert.equal(provider.name, 'aldi-ie');
+    assert.equal(typeof provider.search, 'function');
+    assert.equal(typeof provider.listStores, 'function');
+    assert.equal(typeof provider.selectStore, 'function');
+    assert.equal(provider.checkout, undefined);
   });
 
   check('every manifest entry is loadable asynchronously too', async () => {
