@@ -284,9 +284,12 @@ function nearbyStoreOptions(options: StoreSearchOptions): {
     latitude: options.latitude,
     longitude: options.longitude,
     range,
-    shoppingMode: options.shoppingMode ?? 'pickup',
+    shoppingMode: options.shoppingMode ?? 'delivery',
   };
 }
+
+// Node clamps larger setTimeout delays to 1 ms.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export class SuperValuIrelandProvider implements GroceryProvider {
   readonly name = 'supervalu-ie';
@@ -307,7 +310,9 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     this.requestTimeoutMs = options.requestTimeoutMs ?? 10000;
     this.storeLookupTimeoutMs = options.storeLookupTimeoutMs ?? 30000;
     for (const value of [this.requestTimeoutMs, this.storeLookupTimeoutMs]) {
-      if (!Number.isSafeInteger(value) || value <= 0) throw new ProviderInputError('SuperValu Ireland', 'timeout must be a positive integer');
+      if (!Number.isSafeInteger(value) || value <= 0 || value > MAX_TIMER_DELAY_MS) {
+        throw new ProviderInputError('SuperValu Ireland', `timeout must be a positive integer no greater than ${MAX_TIMER_DELAY_MS}`);
+      }
     }
   }
 

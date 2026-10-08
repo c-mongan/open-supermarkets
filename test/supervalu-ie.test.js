@@ -285,6 +285,22 @@ test('supervalu: uses the nearby store endpoint and pickup mode id', async () =>
   assert.equal(url.searchParams.get('shoppingModeId'), '11111111-1111-1111-1111-111111111111');
 });
 
+test('supervalu: nearby discovery defaults to the delivery mode used by search', async () => {
+  const calls = [];
+  const provider = new SuperValuIrelandProvider({
+    fetcher: queueFetch([jsonFixture('supervalu-stores.json')], calls),
+  });
+  await provider.listStores({ limit: 3, latitude: 53.338671, longitude: -9.179969, range: 8 });
+  const deliveryId = new URL(calls[0].url).searchParams.get('shoppingModeId');
+  assert.equal(deliveryId, '22222222-2222-2222-2222-222222222222');
+});
+
+test('supervalu: rejects timeouts above the Node timer maximum', () => {
+  assert.throws(() => new SuperValuIrelandProvider({ requestTimeoutMs: 2_147_483_648 }), /no greater than 2147483647/);
+  assert.throws(() => new SuperValuIrelandProvider({ storeLookupTimeoutMs: 2_147_483_648 }), /no greater than 2147483647/);
+  new SuperValuIrelandProvider({ requestTimeoutMs: 2_147_483_647 });
+});
+
 test('supervalu: rejects local filters and offsets on nearby-store lookups', async () => {
   const calls = [];
   const provider = new SuperValuIrelandProvider({ fetcher: queueFetch([], calls) });
