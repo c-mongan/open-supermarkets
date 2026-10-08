@@ -563,6 +563,9 @@ export class SuperValuIrelandProvider implements GroceryProvider {
     if (store.status !== undefined && store.status !== 'active') {
       throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} is not active (${store.status})`);
     }
+    if (store.shopping_modes !== undefined && !store.shopping_modes.some((mode) => mode.includes('delivery'))) {
+      throw new ProviderInputError('SuperValu Ireland', `Store ${storeId} does not offer the delivery catalogue used by search`);
+    }
   }
 
   async selectStore(storeId: string): Promise<void> {

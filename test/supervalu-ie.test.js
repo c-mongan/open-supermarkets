@@ -295,6 +295,18 @@ test('supervalu: nearby discovery defaults to the delivery mode used by search',
   assert.equal(deliveryId, '22222222-2222-2222-2222-222222222222');
 });
 
+test('supervalu: rejects pickup-only stores but allows unknown mode metadata', async () => {
+  const pickupOnly = jsonFixture('supervalu-stores.json');
+  pickupOnly.items[0].shoppingModes = ['pickup'];
+  const rejecting = new SuperValuIrelandProvider({ fetcher: queueFetch([pickupOnly]) });
+  await rejects(() => rejecting.selectStore('5550'), /does not offer the delivery catalogue/);
+
+  const unknown = jsonFixture('supervalu-stores.json');
+  delete unknown.items[0].shoppingModes;
+  const accepting = new SuperValuIrelandProvider({ fetcher: queueFetch([unknown]) });
+  await accepting.selectStore('5550');
+});
+
 test('supervalu: rejects timeouts above the Node timer maximum', () => {
   assert.throws(() => new SuperValuIrelandProvider({ requestTimeoutMs: 2_147_483_648 }), /no greater than 2147483647/);
   assert.throws(() => new SuperValuIrelandProvider({ storeLookupTimeoutMs: 2_147_483_648 }), /no greater than 2147483647/);
