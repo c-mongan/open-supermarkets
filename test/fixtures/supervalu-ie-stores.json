@@ -1,0 +1,41 @@
+{
+  "total": 3,
+  "items": [
+    {
+      "retailerStoreId": "76",
+      "name": "Moycullen - Kavanagh's",
+      "status": "Active",
+      "currency": "EUR",
+      "addressLine1": "An Cearnog Nua",
+      "addressLine2": "Moycullen",
+      "city": "Moycullen",
+      "countyProvinceState": "Galway",
+      "country": "Ireland",
+      "postCode": "H91 FKH4",
+      "location": { "latitude": 53.338671, "longitude": -9.179969 },
+      "shoppingModes": ["pickup", "delivery"]
+    },
+    {
+      "retailerStoreId": "309",
+      "name": "Dún Laoghaire SuperValu",
+      "status": "Active",
+      "currency": "EUR",
+      "city": "Dún Laoghaire",
+      "country": "Ireland",
+      "postCode": "A96 X2Y3",
+      "location": { "latitude": 53.29, "longitude": -6.13 },
+      "shoppingModes": ["pickup"]
+    },
+    {
+      "retailerStoreId": "5550",
+      "name": "SuperValu Online",
+      "status": "Active",
+      "currency": "EUR",
+      "addressLine1": "Test Site",
+      "city": "Cork",
+      "country": "Ireland",
+      "postCode": "T12 N799",
+      "location": { "latitude": 0, "longitude": 0 }
+    }
+  ]
+}

@@ -82,6 +82,18 @@ export const PROVIDERS: ProviderManifest[] = [
     credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
     load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
   },
+  {
+    id: 'supervalu-ie',
+    label: 'SuperValu Ireland',
+    country: 'IE',
+    // Prices are per store: search needs SearchOptions.storeId from listStores().
+    capabilities: ['search', 'stores'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol reimplemented from but3k4/supermarket-mcp (MIT)',
+    load: async () => (await import('./supervalu-ie')).SuperValuIrelandProvider,
+  },
 
   // ── Netherlands ──────────────────────────────────────────────────────
   {

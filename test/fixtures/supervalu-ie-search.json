@@ -1,0 +1,49 @@
+{
+  "total": 5,
+  "items": [
+    {
+      "productId": "1025460000",
+      "sku": "1025460000",
+      "name": "SuperValu Fresh Irish Whole Milk (2 L)",
+      "priceNumeric": 2.25,
+      "price": "€2.25",
+      "pricePerUnit": "€1.13/l",
+      "available": true,
+      "hasLoyaltyDiscount": false,
+      "unitOfSize": { "abbreviation": "l", "size": 2 },
+      "image": { "default": "/cell/1025460000_1" },
+      "promotions": [{ "name": "2 for €4.00", "minimumQuantity": 2 }]
+    },
+    {
+      "productId": "1014325007",
+      "name": "Rewards Coffee (190 g)",
+      "priceNumeric": 8.75,
+      "price": "€8.75",
+      "pricePerUnit": "€46.05/kg",
+      "hasLoyaltyDiscount": true,
+      "subtotalWithoutLoyalty": "€12.59",
+      "unitPriceWithoutLoyalty": "€66.26/kg",
+      "available": true
+    },
+    {
+      "productId": "2000000001",
+      "name": "Member Price Only Tea",
+      "priceNumeric": 3.5,
+      "hasLoyaltyDiscount": true,
+      "subtotalWithoutLoyalty": "€4.99"
+    },
+    {
+      "productId": "2000000002",
+      "name": "Unpriced Butter",
+      "priceNumeric": "Special offer",
+      "available": false
+    },
+    {
+      "productId": "2000000003",
+      "name": "Conflicting Stock Bread",
+      "priceNumeric": 1.79,
+      "available": true,
+      "outOfStock": true
+    }
+  ]
+}
