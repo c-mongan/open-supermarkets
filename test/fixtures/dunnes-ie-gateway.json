@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "sku": "DG-5001",
+      "name": "Fresh Milk 2L",
+      "priceNumeric": 2.49,
+      "pricePerUnit": "€1.25/L",
+      "available": true,
+      "imageUrl": "https://img.example.test/dg-milk.jpg",
+      "size": "2 L"
+    },
+    {
+      "sku": "DG-5002",
+      "name": "Wholemeal Bread 800g",
+      "priceNumeric": 2.19,
+      "unitOfSize": { "size": 800, "abbreviation": "g" },
+      "image": { "default": "https://img.example.test/dg-bread.jpg" },
+      "available": false
+    },
+    {
+      "sku": "DG-5003",
+      "name": "Butter 454g",
+      "price": "2 for €5"
+    }
+  ]
+}
