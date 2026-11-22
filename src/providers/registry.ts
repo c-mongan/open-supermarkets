@@ -82,6 +82,17 @@ export const PROVIDERS: ProviderManifest[] = [
     credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
     load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
   },
+  {
+    id: 'mrprice-ie',
+    label: 'Mr Price Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol reimplemented from but3k4/supermarket-mcp (MIT)',
+    load: async () => (await import('./mrprice-ie')).MrPriceIrelandProvider,
+  },
 
   // ── Netherlands ──────────────────────────────────────────────────────
   {
