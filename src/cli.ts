@@ -133,7 +133,9 @@ program
           ? (await import('./providers/tesco/auth')).getSessionInfo()
           : providerName === 'tesco-hu'
             ? (await import('./providers/tesco-hu/session')).getSessionInfo()
-            : undefined;
+            : providerName === 'tesco-ie'
+              ? (await import('./providers/tesco-ie-session')).TESCO_IE_SESSION.getSessionInfo()
+              : undefined;
       const authenticated = await provider.isAuthenticated();
 
       const result = {
@@ -570,7 +572,7 @@ program
         slots.forEach((slot, i) => {
           const available = slot.available ? '✅' : '❌';
           console.log(`${i + 1}. ${slot.date} ${slot.start_time}-${slot.end_time}`);
-          console.log(`   ${money(slot.price)} ${available}`);
+          console.log(`   ${money(slot.price, slot.currency)} ${available}`);
           console.log(`   ID: ${slot.slot_id}\n`);
         });
       }
@@ -583,11 +585,23 @@ program
 // Book slot
 program
   .command('book <slot-id>')
-  .description('Book delivery slot')
+  .description('Book delivery slot. Providers with two-step booking preview first; book with --confirm <code>.')
+  .option('--confirm <code>', 'Confirmation code from the preview (two-step providers)')
   .action(async (slotId, options, cmd) => {
     try {
       const provider = await getProvider(cmd.optsWithGlobals(), { capability: 'slots' });
-      await provider.bookSlot(slotId);
+      if (provider.previewSlotBooking && !options.confirm) {
+        const preview = await provider.previewSlotBooking(slotId);
+        const { slot } = preview;
+        console.log(`🔍 Previewing ${provider.name} slot booking — nothing has been booked.\n`);
+        console.log(`Slot: ${slot.date} ${slot.start_time}-${slot.end_time}, ${money(slot.price, slot.currency)}`);
+        console.log(`Basket: ${preview.basket_quantity} items, ${money(preview.basket_total, preview.currency)}`);
+        if (preview.checkout_url) console.log(`Payment: in your browser at ${preview.checkout_url}`);
+        console.log(`\n💡 To book it, run within 5 minutes (until ${preview.expires_at}):`);
+        console.log(`   supermarket --provider ${provider.name} book ${slotId} --confirm ${preview.confirmation}`);
+        return;
+      }
+      await provider.bookSlot(slotId, options.confirm);
       console.log(`✅ Slot booked with ${provider.name}`);
     } catch (error: any) {
       console.error('❌ Failed to book slot:', explain(error, { provider: cmd?.optsWithGlobals?.().provider ?? program.opts().provider, action: 'book slot' }));
@@ -664,7 +678,7 @@ program
       displayOrders.forEach((order, i) => {
         console.log(`${i + 1}. Order #${order.order_id}`);
         console.log(`   Status: ${order.status}`);
-        console.log(`   Total: ${money(order.total)}`);
+        console.log(`   Total: ${money(order.total, order.currency)}`);
         
         if (order.delivery_slot) {
           console.log(`   Delivery: ${order.delivery_slot.date} ${order.delivery_slot.start_time}-${order.delivery_slot.end_time}`);
@@ -824,8 +838,8 @@ program
       // document.cookie it includes HttpOnly cookies — which is all of the ones that
       // matter here.
       if (options.header || options.stdin) {
-        if (providerName !== 'tesco' && providerName !== 'tesco-hu') {
-          console.error('❌ --header is currently available for --provider tesco and --provider tesco-hu.');
+        if (providerName !== 'tesco' && providerName !== 'tesco-hu' && providerName !== 'tesco-ie') {
+          console.error('❌ --header is currently available for --provider tesco, tesco-hu and tesco-ie.');
           process.exit(1);
         }
         const header = options.stdin
@@ -835,6 +849,10 @@ program
           const { importSessionFromHeader, SESSION_FILE } = await import('./providers/tesco-hu/session');
           const session = importSessionFromHeader(header);
           console.log(`✅ Imported ${session.cookies.length} cookies from header — tesco-hu session saved to ${SESSION_FILE}, valid until ${session.expiresAt}`);
+        } else if (providerName === 'tesco-ie') {
+          const { TESCO_IE_SESSION } = await import('./providers/tesco-ie-session');
+          const session = TESCO_IE_SESSION.importSessionFromHeader(header);
+          console.log(`✅ Imported the tesco-ie access token — session saved to ${TESCO_IE_SESSION.sessionFile}, valid until ${session.expiresAt}`);
         } else {
           const { importSessionFromHeader } = await import('./providers/tesco/import-session');
           importSessionFromHeader(header);
@@ -857,8 +875,12 @@ program
         const { importSession, SESSION_FILE } = await import('./providers/tesco-hu/session');
         const session = importSession(options.file);
         console.log(`✅ Imported ${session.cookies.length} cookies — tesco-hu session saved to ${SESSION_FILE}, valid until ${session.expiresAt}`);
+      } else if (providerName === 'tesco-ie') {
+        const { TESCO_IE_SESSION } = await import('./providers/tesco-ie-session');
+        const session = TESCO_IE_SESSION.importSession(options.file);
+        console.log(`✅ Imported the tesco-ie access token — session saved to ${TESCO_IE_SESSION.sessionFile}, valid until ${session.expiresAt}`);
       } else {
-        console.error('❌ The import-session command is only available for --provider tesco, tesco-hu or ocado');
+        console.error('❌ The import-session command is only available for --provider tesco, tesco-hu, tesco-ie or ocado');
         process.exit(1);
       }
     } catch (error: any) {

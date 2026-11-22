@@ -1,0 +1,121 @@
+{
+  "_note": "Shapes reduced from live xapi.tesco.com (region IE) responses on 2026-11-22. Ids, names, prices and slot ids are fake; no account data.",
+  "basket": [
+    {
+      "data": {
+        "basket": {
+          "id": "trn:tesco:order:v3:r2:fake-basket",
+          "guidePrice": 10.65,
+          "isInAmend": false,
+          "amendExpiry": null,
+          "shoppingMethod": "delivery",
+          "items": [
+            {
+              "id": "05000000000005",
+              "unit": "pcs",
+              "cost": 4.4,
+              "quantity": 2,
+              "product": { "id": "9001001", "tpnb": "9001000", "title": "Tesco Irish Whole Milk 2L", "isForSale": true, "price": { "actual": 2.2 } }
+            },
+            {
+              "id": "05000000000012",
+              "unit": "pcs",
+              "cost": 6.25,
+              "quantity": 1,
+              "product": { "id": "9002001", "tpnb": "9002000", "title": "Tesco Chicken Breast Fillets 650G", "isForSale": true, "price": { "actual": 6.25 } }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "basketAmend": [
+    {
+      "data": {
+        "basket": {
+          "id": "trn:tesco:order:v3:r2:fake-amend",
+          "guidePrice": 4.4,
+          "isInAmend": true,
+          "amendExpiry": "2026-11-24T22:45:00Z",
+          "shoppingMethod": "delivery",
+          "items": [
+            {
+              "id": "05000000000005",
+              "unit": "pcs",
+              "cost": 4.4,
+              "quantity": 2,
+              "product": { "id": "9001001", "tpnb": "9001000", "title": "Tesco Irish Whole Milk 2L", "isForSale": true, "price": { "actual": 2.2 } }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "productByTpnb": [
+    { "data": { "product": { "tpnc": "9003001", "tpnb": "9003000", "title": "Tesco Bananas Loose", "gtin": "00261480000000" } } }
+  ],
+  "unauthorized": [
+    { "errors": [{ "message": "Unauthorized", "path": ["basket"] }], "data": { "basket": null } }
+  ],
+  "slots": [
+    {
+      "data": {
+        "delivery": [
+          {
+            "id": "ZmFrZS1zbG90LTE=",
+            "start": "2026-11-24T12:00:00Z",
+            "end": "2026-11-24T14:00:00Z",
+            "charge": 6,
+            "status": "Available",
+            "price": { "afterDiscount": 6 }
+          },
+          {
+            "id": "ZmFrZS1zbG90LTI=",
+            "start": "2026-11-24T16:00:00Z",
+            "end": "2026-11-24T18:00:00Z",
+            "charge": 8,
+            "status": "Unavailable",
+            "price": { "afterDiscount": 8 }
+          },
+          {
+            "id": "ZmFrZS1zbG90LTM=",
+            "start": "2026-06-24T07:00:00Z",
+            "end": "2026-06-24T09:00:00Z",
+            "charge": 4,
+            "status": "Available",
+            "price": { "afterDiscount": 3 }
+          }
+        ]
+      }
+    }
+  ],
+  "fulfilment": [
+    {
+      "data": {
+        "fulfilment": {
+          "slot": { "id": "ZmFrZS1zbG90LTE=", "status": "Reserved", "start": "2026-11-24T12:00:00Z", "end": "2026-11-24T14:00:00Z", "reservationExpiry": "2026-11-24T10:00:00Z" }
+        }
+      }
+    }
+  ],
+  "orders": [
+    {
+      "data": {
+        "orderSearch": {
+          "orders": [
+            {
+              "id": "trn:tesco:order:fake-1",
+              "orderNo": "1000-0000-01",
+              "status": "Delivered",
+              "totalPrice": 82.4,
+              "slot": { "id": "fake-slot", "start": "2026-11-10T17:00:00Z", "end": "2026-11-10T19:00:00Z", "charge": 5 },
+              "items": [
+                { "id": "05000000000005", "quantity": 2, "product": { "id": "9001001", "tpnb": "9001000", "title": "Tesco Irish Whole Milk 2L" } }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

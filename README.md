@@ -168,7 +168,7 @@ checkout needs an account, address and payment method, so it exists for fewer.
 | Sainsbury's | 🇬🇧 | ✓ | ✓ | ✓ | ✓ | email + password |
 | Ocado | 🇬🇧 | ✓ | ✓ | read-only | — | email + password |
 | Lidl Ireland | 🇮🇪 | ✓ | — | — | — | **none** |
-| Tesco Ireland | 🇮🇪 | ✓ | — | — | — | **none** |
+| Tesco Ireland | 🇮🇪 | ✓ | ✓ | ✓ (book: preview + confirm) | — | **none** for search; browser session for basket |
 | Albert Heijn | 🇳🇱 | ✓ | — | — | — | **none** |
 | Albert Heijn België | 🇧🇪 | ✓ | — | — | — | **none** |
 | Mercadona | 🇪🇸 | ✓ | — | — | — | **none** |
@@ -186,7 +186,11 @@ Lidl Ireland is search-only. Lidl Plus loyalty prices and conditional multibuy p
 not substituted for the regular shelf price. Product availability uses three states:
 `in_stock: true` means available, `false` means explicitly unavailable, and `null` means
 the retailer provided no reliable stock signal. Batch search exposes the same states as `inStock`.
-Tesco Ireland is also search-only: Clubcard Prices never replace the regular price, and stock stays `null`.
+Tesco Ireland search is anonymous: Clubcard Prices never replace the regular price, and stock stays `null`.
+Its basket, delivery slots and order history need a browser session imported with
+`supermarket --provider tesco-ie import-session --stdin`. Booking a slot takes two steps (a preview
+that prints a single-use confirmation code, then `book <slot-id> --confirm <code>`), and payment
+stays on tesco.ie.
 
 Ocado slot booking and checkout are blocked by AWS WAF. Reading slots works; committing
 to one does not. The manifest therefore does not claim those capabilities.

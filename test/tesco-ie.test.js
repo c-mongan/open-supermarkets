@@ -1,7 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { readFileSync } = require('node:fs');
+const { mkdtempSync, readFileSync } = require('node:fs');
+const { tmpdir } = require('node:os');
 const { join } = require('node:path');
 const { test } = require('node:test');
 const { TescoIrelandProvider, TescoIrelandBlockedError } = require('../src/providers/tesco-ie.ts');
@@ -31,17 +32,21 @@ function queue(entries, calls = []) {
   };
 }
 
-const provider = (entries, calls) => new TescoIrelandProvider({ fetcher: queue(entries, calls) });
+// Each provider gets its own cooldown file, so a simulated 403/429 never pauses
+// another test or the real ~/.tesco-ie; and no throttle delay in tests.
+const isolated = () => ({ cooldownFile: join(mkdtempSync(join(tmpdir(), 'tesco-ie-')), 'cooldown.json'), minIntervalMs: 0 });
+const provider = (entries, calls) => new TescoIrelandProvider({ ...isolated(), fetcher: queue(entries, calls) });
 const searchWith = (nodes) => [{ data: { search: { results: nodes.map((node) => ({ node })) } } }];
 
-test('manifest: anonymous IE search only, community, lazily loaded', async () => {
+test('manifest: anonymous search, session basket/slots/orders, no checkout, community, lazily loaded', async () => {
   const manifest = getManifest('tesco-ie');
   assert.equal(manifest.country, 'IE');
-  assert.deepEqual(manifest.capabilities, ['search']);
-  assert.equal(manifest.auth, 'none');
+  assert.deepEqual(manifest.capabilities, ['search', 'basket', 'slots', 'orders']);
+  assert.equal(manifest.auth, 'session-cookie');
   assert.equal(manifest.tier, 'community');
   assert.equal(manifest.maintainer, 'c-mongan');
-  assert.equal(manifest.session, undefined);
+  assert.equal(manifest.session, '.tesco-ie/session.json');
+  assert.notEqual(manifest.searchNeedsSession, true);
   assert.equal(await manifest.load(), TescoIrelandProvider);
   assert.equal((await createProvider('tesco-ie')).name, 'tesco-ie');
 });
@@ -142,7 +147,7 @@ test('HTTP failures keep their status, never read the body and never fall back',
   for (const status of [401, 403, 429, 500]) {
     let requests = 0;
     let bodyReads = 0;
-    const p = new TescoIrelandProvider({ fetcher: async () => {
+    const p = new TescoIrelandProvider({ ...isolated(), fetcher: async () => {
       requests++;
       return { ok: false, status, headers: { get: () => null }, text: async () => { bodyReads++; throw new Error('unreadable'); } };
     } });

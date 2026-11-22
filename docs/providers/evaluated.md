@@ -16,7 +16,7 @@ is a reason to re-probe, not a reason to stop.
 | Loblaws / PC Express | CA | blocked | HTTP 403 "Access Denied" on api.pcexpress.ca |
 | Target | US | blocked | RedSky now answers 403 + CAPTCHA challenge |
 | Walmart | US | blocked | consumer GraphQL returns HTTP 418 (bot detection) |
-| ~~Tesco Ireland~~ | IE | **BUILT** | xapi with the IE storefront's own public web key and `region: IE`; search-only — see `src/providers/tesco-ie.ts` |
+| ~~Tesco Ireland~~ | IE | **BUILT** | xapi with the IE storefront's own public web key and `region: IE`; anonymous search, basket/slots/orders with an imported session — see `src/providers/tesco-ie.ts` |
 | ~~Lidl Ireland~~ | IE | **BUILT** | anonymous catalogue search, regular EUR prices; stock stays unknown without retailer evidence — see `src/providers/lidl-ie.ts` |
 | ~~Mercadona~~ | ES | **BUILT** | Algolia key found in the frontend bundle — see src/providers/mercadona.ts |
 | ~~Tesco Hungary~~ | HU | **BUILT** | same xapi as the UK, selected by `region: HU` — see src/providers/tesco-hu/ |

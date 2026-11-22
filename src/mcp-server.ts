@@ -314,12 +314,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'grocery_book_slot',
-        description: 'Book a delivery slot.',
+        description: 'Book a delivery slot. Some providers (tesco-ie) book in two steps: the first call returns a preview ' +
+          'and a confirmation code and books nothing; book by calling again with that confirmation once the user agrees.',
         inputSchema: {
           type: 'object',
           properties: {
             provider: { ...providerEnum, default: 'sainsburys' },
             slot_id: { type: 'string', description: 'Slot ID from grocery_slots results' },
+            confirmation: { type: 'string', description: 'Code from the preview call (two-step providers only)' },
           },
           required: ['slot_id'],
         },
@@ -656,7 +658,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const formatted = slots.map((slot, i) => {
         const avail = slot.available ? 'Available' : 'Unavailable';
-        return `${i + 1}. ${slot.date} ${slot.start_time}-${slot.end_time}\n   ${money(slot.price)} | ${avail} | ID: ${slot.slot_id}`;
+        return `${i + 1}. ${slot.date} ${slot.start_time}-${slot.end_time}\n   ${money(slot.price, slot.currency)} | ${avail} | ID: ${slot.slot_id}`;
       }).join('\n\n');
 
       return textResult(`${providerName.toUpperCase()} Delivery Slots:\n\n${formatted}`);
@@ -664,9 +666,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_book_slot ──
     if (name === 'grocery_book_slot') {
-      const { slot_id } = args as { slot_id: string };
+      const { slot_id, confirmation } = args as { slot_id: string; confirmation?: string };
       const provider = await getProvider();
-      await provider.bookSlot(slot_id);
+      if (provider.previewSlotBooking && !confirmation) {
+        const preview = await provider.previewSlotBooking(slot_id);
+        const { slot } = preview;
+        return textResult(
+          `NOT BOOKED — preview only. ${providerName} slot ${slot.date} ${slot.start_time}-${slot.end_time}, ` +
+          `${money(slot.price, slot.currency)}. Basket: ${preview.basket_quantity} items, ${money(preview.basket_total, preview.currency)}.` +
+          `${preview.checkout_url ? ` Payment happens in a browser at ${preview.checkout_url}.` : ''}\n\n` +
+          `Show this to the user. Only if they explicitly confirm, call grocery_book_slot again with ` +
+          `slot_id "${slot_id}" and confirmation "${preview.confirmation}" before ${preview.expires_at}.`
+        );
+      }
+      await provider.bookSlot(slot_id, confirmation);
       return textResult(`Slot ${slot_id} booked at ${providerName}.`);
     }
 
@@ -702,7 +715,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const delivery = order.delivery_slot
           ? `\n   Delivery: ${order.delivery_slot.date} ${order.delivery_slot.start_time}-${order.delivery_slot.end_time}`
           : '';
-        return `${i + 1}. Order #${order.order_id}\n   Total: ${money(order.total)} | Status: ${order.status}${delivery}`;
+        return `${i + 1}. Order #${order.order_id}\n   Total: ${money(order.total, order.currency)} | Status: ${order.status}${delivery}`;
       }).join('\n\n');
 
       return textResult(

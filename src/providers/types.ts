@@ -101,12 +101,36 @@ export interface DeliverySlot {
   date: string;
   price: number;
   available: boolean;
+  /** ISO 4217 of `price`. Absent means GBP, like Product.currency. */
+  currency?: string;
+}
+
+/**
+ * What booking a slot would do, returned before anything is reserved.
+ *
+ * Providers that implement `previewSlotBooking` refuse `bookSlot` unless it is
+ * given the `confirmation` code from a preview of the same slot that has not
+ * expired. The code is single-use.
+ */
+export interface SlotBookingPreview {
+  slot: DeliverySlot;
+  /** Pass to `bookSlot(slotId, confirmation)` to book this slot. */
+  confirmation: string;
+  /** ISO time after which the confirmation is refused. */
+  expires_at: string;
+  basket_total: number | null;
+  basket_quantity: number;
+  currency: string;
+  /** Where payment is completed in a browser, when the provider does not check out. */
+  checkout_url?: string;
 }
 
 export interface Order {
   order_id: string;
   status: string;
   total: number;
+  /** ISO 4217 of `total`. Absent means GBP, like Product.currency. */
+  currency?: string;
   delivery_slot?: DeliverySlot;
   items: BasketItem[];
 }
@@ -227,7 +251,9 @@ export interface GroceryProvider {
 
   // ── delivery & checkout ──────────────────────────────────────────────
   getDeliverySlots?(): Promise<DeliverySlot[]>;
-  bookSlot?(slotId: string): Promise<void>;
+  /** Two-step booking: preview first, then bookSlot with the returned confirmation. */
+  previewSlotBooking?(slotId: string): Promise<SlotBookingPreview>;
+  bookSlot?(slotId: string, confirmation?: string): Promise<void>;
   checkout?(dryRun?: boolean): Promise<Order>;
 
   // ── orders ───────────────────────────────────────────────────────────
@@ -243,5 +269,5 @@ export interface GroceryProvider {
  * `assertCapability()`, which is honest about the fact that most providers in
  * the world do not do checkout.
  */
-export type FullGroceryProvider = Required<Omit<GroceryProvider, 'allowOrderAmend'>> &
-  Pick<GroceryProvider, 'allowOrderAmend'>;
+export type FullGroceryProvider = Required<Omit<GroceryProvider, 'allowOrderAmend' | 'previewSlotBooking'>> &
+  Pick<GroceryProvider, 'allowOrderAmend' | 'previewSlotBooking'>;

@@ -86,9 +86,13 @@ export const PROVIDERS: ProviderManifest[] = [
     id: 'tesco-ie',
     label: 'Tesco Ireland',
     country: 'IE',
-    capabilities: ['search'],
-    // Sends Tesco's public web API key; no session or token is minted.
-    auth: 'none',
+    // Basket and slot listing verified live on 2026-11-22 with an imported browser
+    // session; the order-history query was accepted live (the account had no orders).
+    // Search stays anonymous. No 'checkout': payment happens on tesco.ie, and slot
+    // booking is two-step (preview, then confirm).
+    capabilities: ['search', 'basket', 'slots', 'orders'],
+    auth: 'session-cookie',
+    session: '.tesco-ie/session.json',
     tier: 'community',
     maintainer: 'c-mongan',
     credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
