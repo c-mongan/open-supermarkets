@@ -17,7 +17,6 @@ import { explain } from '../src/errors';
 import {
   parseCookieHeader,
   normaliseCookieExport,
-  inferSessionExpiry,
   saveSession,
   loadSession,
   getSessionInfo,
@@ -25,6 +24,7 @@ import {
   getCookieString,
   importSessionFromHeader,
 } from '../src/providers/tesco-hu/session';
+import { inferSessionExpiry } from '../src/providers/tesco-session';
 import { TescoHuAPI, TescoHuSessionError, TESCO_HU } from '../src/providers/tesco-hu/api';
 import { TescoHuProvider, normaliseProduct, normaliseBasket, flattenTaxonomy } from '../src/providers/tesco-hu/index';
 
