@@ -82,6 +82,18 @@ export const PROVIDERS: ProviderManifest[] = [
     credit: 'Protocol reimplemented from AviBackToBlack/lidaldi (MIT)',
     load: async () => (await import('./lidl-ie')).LidlIrelandProvider,
   },
+  {
+    id: 'tesco-ie',
+    label: 'Tesco Ireland',
+    country: 'IE',
+    capabilities: ['search'],
+    // Sends Tesco's public web API key; no session or token is minted.
+    auth: 'none',
+    tier: 'community',
+    maintainer: 'c-mongan',
+    credit: 'Protocol cross-checked against basketeer and grocery-cli (MIT); Irish catalogue verified independently',
+    load: async () => (await import('./tesco-ie')).TescoIrelandProvider,
+  },
 
   // ── Netherlands ──────────────────────────────────────────────────────
   {
