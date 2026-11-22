@@ -17,6 +17,7 @@
  */
 
 import { getManifest } from './providers/registry';
+import { ProviderProtocolError } from './providers/ie/shared';
 
 export interface ExplainOptions {
   /** Provider id, so the suggested fix names the right one. */
@@ -74,6 +75,10 @@ export function explain(err: any, opts: ExplainOptions = {}): string {
   const status = statusOf(err);
   const who = opts.provider ? `${opts.provider}` : 'the provider';
   const what = opts.action ? ` while trying to ${opts.action}` : '';
+
+  // A ProviderProtocolError is written by the provider itself (its session help
+  // may mention "Access Denied" as advice), so it is never a raw WAF body.
+  if (err instanceof ProviderProtocolError) return raw;
 
   // Bot protection is checked FIRST. It arrives as prose rather than a status
   // code, and those strings are long enough to fool alreadyExplained() into

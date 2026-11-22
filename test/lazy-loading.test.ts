@@ -241,6 +241,15 @@ console.log('\nerror translation');
       '(capturing them requires performing a real booking).';
     assert.strictEqual(explain({ message: considered }, { provider: 'ocado' }), considered);
   });
+
+  check('a provider session error that mentions "Access Denied" as advice is not called a bot challenge', () => {
+    const { TescoIrelandSessionError } = require('../src/providers/tesco-ie');
+    const error = new TescoIrelandSessionError('there is no saved session, or it has expired');
+    const m = explain(error, { provider: 'tesco-ie', action: 'get basket' });
+    assert.strictEqual(m, error.message);
+    assert.match(m, /import-session/);
+    assert.doesNotMatch(m, /bot-protection challenge/);
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────
