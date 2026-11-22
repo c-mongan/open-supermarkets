@@ -31,6 +31,7 @@ export const TOOL_ROUTES: Record<string, Route> = {
   grocery_basket_remove: { need: { capability: 'basket' } },
   grocery_basket_update: { need: { capability: 'basket' } },
   grocery_basket_clear: { need: { capability: 'basket' } },
+  grocery_basket_restore: { need: { capability: 'basket' } },
   grocery_slots: { need: { capability: 'slots' } },
   grocery_book_slot: { need: { capability: 'slots' } },
   grocery_checkout: { need: { capability: 'checkout' } },

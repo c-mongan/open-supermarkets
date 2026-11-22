@@ -11,7 +11,7 @@ import {
   checkAccess,
   type Need,
 } from './providers/registry';
-import type { Capability, FullGroceryProvider } from './providers/types';
+import type { BasketChangePreview, Capability, FullGroceryProvider } from './providers/types';
 import { money, byPrice, cheapest, dealCandidates, stockLabel } from './format';
 import { explain } from './errors';
 // Tesco is imported as a *type only* — a value import here would pull Playwright
@@ -717,22 +717,65 @@ program
     }
   });
 
+function printBasketChangePreview(providerName: string, preview: BasketChangePreview, command: string): void {
+  const verb = preview.action === 'clear' ? 'remove' : 're-add';
+  console.log(`🔍 Previewing ${providerName} basket ${preview.action} — nothing has been changed.\n`);
+  console.log(`Would ${verb}: ${preview.line_count} lines, ${preview.item_count} items, ${money(preview.total, preview.currency)}`);
+  console.log(`${preview.action === 'clear' ? 'Rollback snapshot saved' : 'Snapshot'}: ${preview.snapshot_file}`);
+  console.log(`\n💡 To go ahead, run within 5 minutes (until ${preview.expires_at}):`);
+  console.log(`   supermarket --provider ${providerName} ${command} --confirm ${preview.confirmation}`);
+}
+
 // Clear basket
 program
   .command('clear')
-  .description('Clear all items from basket')
-  .option('--force', 'Skip confirmation prompt')
+  .description('Clear all items from basket. Two-step providers (tesco-ie) preview and save a rollback snapshot first; clear with --confirm <code>.')
+  .option('--force', 'Skip confirmation prompt (one-step providers only)')
+  .option('--confirm <code>', 'Confirmation code from the preview (two-step providers)')
   .action(async (options, cmd) => {
     try {
+      const provider = await getProvider(cmd.optsWithGlobals(), { capability: 'basket' });
+      if (provider.previewClearBasket) {
+        if (!options.confirm) {
+          printBasketChangePreview(provider.name, await provider.previewClearBasket(), 'clear');
+          return;
+        }
+        await provider.clearBasket(options.confirm);
+        console.log(`✅ Basket cleared. Undo with: supermarket --provider ${provider.name} restore <snapshot>`);
+        return;
+      }
       if (!options.force) {
         console.log('⚠️  Use --force to confirm clearing the basket');
         process.exit(0);
       }
-      const provider = await getProvider(cmd.optsWithGlobals(), { capability: 'basket' });
       await provider.clearBasket();
       console.log(`✅ Basket cleared`);
     } catch (error: any) {
       console.error('❌ Failed to clear basket:', explain(error, { provider: cmd?.optsWithGlobals?.().provider ?? program.opts().provider, action: 'clear basket' }));
+      process.exit(1);
+    }
+  });
+
+// Restore a basket snapshot saved by a two-step clear
+program
+  .command('restore <snapshot>')
+  .description('Re-add the lines of a basket snapshot saved by `clear` (two-step providers). Previews first; restore with --confirm <code>.')
+  .option('--confirm <code>', 'Confirmation code from the preview')
+  .action(async (snapshot, options, cmd) => {
+    try {
+      const provider = await getProvider(cmd.optsWithGlobals(), { capability: 'basket' });
+      if (!provider.previewRestoreBasket || !provider.restoreBasket) {
+        console.error(`❌ ${provider.name} does not save basket snapshots, so there is nothing to restore.`);
+        process.exit(1);
+      }
+      if (!options.confirm) {
+        printBasketChangePreview(provider.name, await provider.previewRestoreBasket(snapshot), `restore ${snapshot}`);
+        return;
+      }
+      await provider.restoreBasket(snapshot, options.confirm);
+      console.log(`✅ Snapshot restored into the ${provider.name} basket`);
+    } catch (error: any) {
+      console.error('❌ Failed to restore basket:', explain(error, { provider: cmd?.optsWithGlobals?.().provider ?? program.opts().provider, action: 'restore basket' }));
       process.exit(1);
     }
   });

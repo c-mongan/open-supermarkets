@@ -11,6 +11,10 @@ pbpaste | supermarket --provider tesco-ie import-session --stdin    # Cookie hea
 supermarket --provider tesco-ie basket
 supermarket --provider tesco-ie add 50502269 -q 1                    # product_uid from search
 supermarket --provider tesco-ie remove 50502269
+supermarket --provider tesco-ie clear                                # preview + rollback snapshot, changes nothing
+supermarket --provider tesco-ie clear --confirm <code>               # clears the previewed basket
+supermarket --provider tesco-ie restore <snapshot>                   # preview re-adding a snapshot
+supermarket --provider tesco-ie restore <snapshot> --confirm <code>  # re-adds its lines
 supermarket --provider tesco-ie slots
 supermarket --provider tesco-ie book <slot-id>                       # preview only, books nothing
 supermarket --provider tesco-ie book <slot-id> --confirm <code>      # books the previewed slot
@@ -102,6 +106,27 @@ stops on its own if xapi ever refuses it (see Protocol above).
 - **Amend guard**: when the basket is an upcoming order being amended (`isInAmend`), every
   write and every slot preview is refused with `OrderAmendError` before any mutation.
   `--amend` (CLI), `amend: true` (MCP) or `allowOrderAmend(true)` opts in.
+- **Clearing takes two steps, and saves a rollback snapshot first**:
+  1. `clear` (or `previewClearBasket`, or the MCP `grocery_basket_clear` without a
+     `confirmation`) reads the basket and writes every line (TPNB, TPNC, name, quantity,
+     unit, cost) plus a SHA-256 of the basket id and lines to
+     `~/.tesco-ie/basket-snapshots/<timestamp>.json` (file 0600, folder 0700; never
+     overwritten). It prints the line count, item count and known total, and an 8-hex code
+     tied to that hash, valid for 5 minutes (kept in `~/.tesco-ie/basket-change.json`).
+     An empty basket is refused; nothing to snapshot.
+  2. `clear --confirm <code>` re-reads the basket and refuses unless the code matches a
+     pending clear preview, has not expired, the snapshot is still readable, and the basket
+     hashes the same (any added, removed or re-quantified line refuses). Then one
+     `UpdateBasket` sets every line to 0, and the basket is read back; any remaining line is
+     an error naming the snapshot. The code is single-use and is spent on any attempt.
+  `--force` is ignored for tesco-ie; one-step providers keep it.
+- **Restore** re-adds a snapshot, in the same two steps: `restore <snapshot>` (a path, or a
+  bare file name inside `~/.tesco-ie/basket-snapshots`) verifies the file against its hash
+  and previews; `restore <snapshot> --confirm <code>` refuses a different snapshot or a
+  basket changed since the preview, then sends one `UpdateBasket` adding each snapshot
+  quantity on top of what the basket holds, and reads back. Lines Tesco will not sell are
+  undone; those and any line not at the expected quantity are reported as an error. MCP:
+  `grocery_basket_restore` with `snapshot` (and `confirmation`).
 
 ## Slots
 
@@ -151,7 +176,8 @@ stops on its own if xapi ever refuses it (see Protocol above).
 | HTTP 429 | `ProviderHttpError` 429; starts the pause |
 | Akamai 403/429 (`Server: AkamaiGHost` / `akamai-grn`), or an HTML challenge where JSON was expected | `TescoIrelandBlockedError`; starts the pause |
 | Any request while a pause lasts | `TescoIrelandCooldownError`, nothing sent |
-| Booking without a valid, current confirmation | `TescoIrelandConfirmationError`, nothing booked |
+| Booking, clearing or restoring without a valid, current confirmation, or after the basket changed | `TescoIrelandConfirmationError`, nothing booked or changed |
+| Restoring a snapshot that is missing, foreign, or whose lines do not match its hash | `RangeError`, before any request |
 | Invalid JSON, missing fields, a line update Tesco did not apply, malformed envelopes | `ProviderProtocolError` |
 
 Error bodies of failed HTTP responses are never read, so an unreadable body cannot mask

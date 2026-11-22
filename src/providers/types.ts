@@ -241,7 +241,17 @@ export interface GroceryProvider {
   addToBasket?(productId: string, quantity: number): Promise<void>;
   updateBasketItem?(itemId: string, quantity: number): Promise<void>;
   removeFromBasket?(itemId: string): Promise<void>;
-  clearBasket?(): Promise<void>;
+  /** Providers with `previewClearBasket` refuse this without the preview's confirmation. */
+  clearBasket?(confirmation?: string): Promise<void>;
+  /**
+   * Two-step clear: saves a rollback snapshot of the basket and returns a
+   * confirmation for `clearBasket(confirmation)`. Nothing is changed.
+   */
+  previewClearBasket?(): Promise<BasketChangePreview>;
+  /** Two-step restore: preview re-adding a snapshot's lines. Nothing is changed. */
+  previewRestoreBasket?(snapshot: string): Promise<BasketChangePreview>;
+  /** Re-add a snapshot's lines, with the confirmation from `previewRestoreBasket`. */
+  restoreBasket?(snapshot: string, confirmation: string): Promise<void>;
   /**
    * Opt in to basket writes that edit an upcoming order in amend mode.
    * Off by default: a write that would silently change someone's next
@@ -261,6 +271,30 @@ export interface GroceryProvider {
 }
 
 /**
+ * What clearing a basket, or restoring a saved snapshot of one, would do.
+ * Returned before anything changes. The confirmation is single-use, expires,
+ * and is refused when the basket changed since the preview.
+ */
+export interface BasketChangePreview {
+  action: 'clear' | 'restore';
+  confirmation: string;
+  /** ISO time after which the confirmation is refused. */
+  expires_at: string;
+  /** Basket lines the change touches (cleared lines, or snapshot lines re-added). */
+  line_count: number;
+  /** Sum of those lines' quantities. */
+  item_count: number;
+  /** Known total of those lines; null when a price is unknown. */
+  total: number | null;
+  currency: string;
+  /** The rollback snapshot written by a clear preview, or the snapshot being restored. */
+  snapshot_file: string;
+}
+
+/** Members a full-service provider may still lack: opt-ins and two-step flows. */
+type OptionalSurface = 'allowOrderAmend' | 'previewSlotBooking' | 'previewClearBasket' | 'previewRestoreBasket' | 'restoreBasket';
+
+/**
  * A provider that implements the whole surface — search through checkout.
  *
  * This exists so code that has already established it is holding a full-service
@@ -269,5 +303,5 @@ export interface GroceryProvider {
  * `assertCapability()`, which is honest about the fact that most providers in
  * the world do not do checkout.
  */
-export type FullGroceryProvider = Required<Omit<GroceryProvider, 'allowOrderAmend' | 'previewSlotBooking'>> &
-  Pick<GroceryProvider, 'allowOrderAmend' | 'previewSlotBooking'>;
+export type FullGroceryProvider = Required<Omit<GroceryProvider, OptionalSurface>> &
+  Pick<GroceryProvider, OptionalSurface>;

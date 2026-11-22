@@ -22,7 +22,7 @@ import {
   isAccessError,
 } from './providers/registry.js';
 import { TOOL_ROUTES, eligibleProviders } from './mcp-routes.js';
-import type { FullGroceryProvider } from './providers/types.js';
+import type { BasketChangePreview, FullGroceryProvider } from './providers/types.js';
 import { money, stockLabel, cheapest } from './format.js';
 import { explain } from './errors.js';
 import * as fs from 'fs';
@@ -54,6 +54,18 @@ function textResult(text: string, isError = false) {
     content: [{ type: 'text' as const, text }],
     ...(isError ? { isError: true } : {}),
   };
+}
+
+/** Two-step clear/restore preview, worded so an agent asks before confirming. */
+function basketChangeResult(providerName: string, preview: BasketChangePreview, again: string) {
+  const verb = preview.action === 'clear' ? 'remove' : 're-add';
+  return textResult(
+    `NOT CHANGED — preview only. ${providerName} basket ${preview.action} would ${verb} ${preview.line_count} lines, ` +
+    `${preview.item_count} items, ${money(preview.total, preview.currency)}. ` +
+    `${preview.action === 'clear' ? 'Rollback snapshot saved' : 'Snapshot'}: ${preview.snapshot_file}\n\n` +
+    `Show this to the user. Only if they explicitly confirm, call ${again} with ` +
+    `confirmation "${preview.confirmation}" before ${preview.expires_at}.`
+  );
 }
 
 function searchLimit(value: unknown, fallback: number): number {
@@ -291,13 +303,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'grocery_basket_clear',
-        description: 'Clear all items from the shopping basket. This cannot be undone.',
+        description: 'Clear all items from the shopping basket. Some providers (tesco-ie) clear in two steps: the first call ' +
+          'saves a rollback snapshot, returns a preview and a confirmation code, and changes nothing; clear by calling again ' +
+          'with that confirmation once the user agrees. Elsewhere this cannot be undone.',
         inputSchema: {
           type: 'object',
           properties: {
             provider: { ...providerEnum, default: 'sainsburys' },
             amend: amendProp,
+            confirmation: { type: 'string', description: 'Code from the preview call (two-step providers only)' },
           },
+        },
+      },
+      {
+        name: 'grocery_basket_restore',
+        description: 'Re-add the lines of a basket snapshot saved by a two-step grocery_basket_clear (tesco-ie). The first ' +
+          'call previews and changes nothing; restore by calling again with the confirmation once the user agrees.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            provider: { ...providerEnum, default: 'sainsburys' },
+            amend: amendProp,
+            snapshot: { type: 'string', description: 'Snapshot file path, or its name in the snapshot folder' },
+            confirmation: { type: 'string', description: 'Code from the preview call' },
+          },
+          required: ['snapshot'],
         },
       },
 
@@ -642,9 +672,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     // ── grocery_basket_clear ──
     if (name === 'grocery_basket_clear') {
+      const { confirmation } = args as { confirmation?: string };
       const provider = await getProvider((args as any).amend === true);
+      if (provider.previewClearBasket) {
+        if (!confirmation) {
+          return basketChangeResult(providerName, await provider.previewClearBasket(), 'grocery_basket_clear again');
+        }
+        await provider.clearBasket(confirmation);
+        return textResult(`${providerName} basket cleared. Undo with grocery_basket_restore and the snapshot from the preview.`);
+      }
       await provider.clearBasket();
       return textResult(`${providerName} basket cleared.`);
+    }
+
+    // ── grocery_basket_restore ──
+    if (name === 'grocery_basket_restore') {
+      const { snapshot, confirmation } = args as { snapshot: string; confirmation?: string };
+      const provider = await getProvider((args as any).amend === true);
+      if (!provider.previewRestoreBasket || !provider.restoreBasket) {
+        return textResult(`${providerName} does not save basket snapshots, so there is nothing to restore.`, true);
+      }
+      if (!confirmation) {
+        return basketChangeResult(providerName, await provider.previewRestoreBasket(snapshot),
+          `grocery_basket_restore again with snapshot "${snapshot}" and`);
+      }
+      await provider.restoreBasket(snapshot, confirmation);
+      return textResult(`Snapshot ${snapshot} restored into the ${providerName} basket.`);
     }
 
     // ── grocery_slots ──

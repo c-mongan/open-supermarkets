@@ -11,14 +11,16 @@
  * Basket, slots and orders use an imported browser session (see
  * tesco-ie-session.ts): the same xapi operations with the access token as a
  * bearer header. Basket writes refuse an order that is being amended unless
- * the caller opted in. Booking a slot is two-step (preview, then confirm with
- * a single-use code) and is never retried or done through a browser. There is
- * no checkout: payment happens on tesco.ie (TESCO_IE_CHECKOUT_URL).
+ * the caller opted in. Booking a slot, clearing the basket and restoring a
+ * basket snapshot are two-step (preview, then confirm with a single-use code);
+ * a clear preview first saves a rollback snapshot. Booking is never retried or
+ * done through a browser. There is no checkout: payment happens on tesco.ie
+ * (TESCO_IE_CHECKOUT_URL).
  *
  * This is separate from the GB `tesco` provider. Protocol cross-checked
  * against basketeer and grocery-cli (MIT).
  */
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -29,6 +31,7 @@ import { TESCO_IE_SESSION } from './tesco-ie-session';
 import type { TescoCookieSession, TescoSessionStore } from './tesco-session';
 import type {
   Basket,
+  BasketChangePreview,
   BasketItem,
   DeliverySlot,
   GroceryProvider,
@@ -198,13 +201,15 @@ export class TescoIrelandSessionError extends ProviderProtocolError {
   }
 }
 
-/** A slot booking was attempted without a valid, current preview confirmation. */
+/** A slot booking, basket clear or restore was attempted without a valid, current preview confirmation. */
 export class TescoIrelandConfirmationError extends ProviderProtocolError {
-  constructor(detail: string) {
-    super(PROVIDER, `${detail}. No slot was booked.`);
+  constructor(detail: string, outcome = 'No slot was booked.') {
+    super(PROVIDER, `${detail}. ${outcome}`);
     this.name = 'TescoIrelandConfirmationError';
   }
 }
+
+const BASKET_UNCHANGED = 'The basket was not changed.';
 
 export interface TescoIrelandOptions {
   fetcher?: FetchLike;
@@ -213,6 +218,10 @@ export interface TescoIrelandOptions {
   sessionStore?: TescoSessionStore;
   /** Where a pending slot-booking confirmation is kept. Default beside the session. */
   bookingFile?: string;
+  /** Where a pending clear/restore confirmation is kept. Default beside the session. */
+  basketChangeFile?: string;
+  /** Where clear previews save rollback snapshots. Default <session dir>/basket-snapshots. */
+  snapshotDir?: string;
   /**
    * Records a pause after Tesco answers 403/429 or a bot challenge; while it
    * lasts no request is sent. Default beside the session.
@@ -257,6 +266,44 @@ interface PendingBooking {
   basket_total: number | null;
   basket_quantity: number;
   expires_at: string;
+}
+
+interface SnapshotLine {
+  /** TPNB, what search and `add` use. */
+  product_uid: string;
+  /** TPNC, what UpdateBasket takes. */
+  tpnc: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  cost: number | null;
+}
+
+interface BasketSnapshot {
+  version: 1;
+  provider: 'tesco-ie';
+  basket_id: string;
+  taken_at: string;
+  /** basketHash of the basket the snapshot was taken from. */
+  hash: string;
+  lines: SnapshotLine[];
+}
+
+interface PendingBasketChange {
+  action: 'clear' | 'restore';
+  confirmation: string;
+  snapshot_file: string;
+  /** basketHash of the basket at preview time; the confirm refuses any other. */
+  basket_hash: string;
+  expires_at: string;
+}
+
+/** Identity of a basket's contents: its id and every line's TPNC, quantity and unit. */
+function basketHash(basketId: string, lines: Array<{ tpnc: string; quantity: number; unit: string }>): string {
+  const canonical = lines
+    .map((l) => [l.tpnc, l.quantity, l.unit] as const)
+    .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
+  return createHash('sha256').update(JSON.stringify([basketId, canonical])).digest('hex');
 }
 
 // Regular prices must be plain non-negative numbers; never strip promotional
@@ -494,12 +541,50 @@ function sameCode(expected: string, given: string): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** Parse and verify a snapshot file; a tampered or foreign file is refused. */
+function parseSnapshot(file: string, text: string): BasketSnapshot {
+  const bad = (why: string) => new RangeError(`${file} is not a usable ${PROVIDER} basket snapshot: ${why}`);
+  let raw: Record<string, unknown>;
+  try {
+    raw = asRecord(JSON.parse(text));
+  } catch {
+    throw bad('not JSON');
+  }
+  const basketId = firstString(raw.basket_id);
+  const takenAt = firstString(raw.taken_at);
+  const hash = firstString(raw.hash);
+  if (raw.version !== 1 || raw.provider !== 'tesco-ie' || !basketId || !takenAt || !hash || !Array.isArray(raw.lines)) {
+    throw bad('missing version, provider, basket_id, taken_at, hash or lines');
+  }
+  const lines = raw.lines.map((value): SnapshotLine => {
+    const line = asRecord(value);
+    const productUid = firstString(line.product_uid);
+    const tpnc = firstString(line.tpnc);
+    const quantity = line.quantity;
+    if (!productUid || !tpnc || typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity < 1) {
+      throw bad('a line is missing product_uid, tpnc or a positive quantity');
+    }
+    return {
+      product_uid: productUid,
+      tpnc,
+      name: firstString(line.name) ?? `Product ${productUid}`,
+      quantity,
+      unit: firstString(line.unit) ?? 'pcs',
+      cost: strictAmount(line.cost),
+    };
+  });
+  if (basketHash(basketId, lines) !== hash) throw bad('its lines do not match its hash');
+  return { version: 1, provider: 'tesco-ie', basket_id: basketId, taken_at: takenAt, hash, lines };
+}
+
 export class TescoIrelandProvider implements GroceryProvider {
   readonly name = 'tesco-ie';
   private readonly fetcher: FetchLike;
   private readonly apiKey: string;
   private readonly sessionStore: TescoSessionStore;
   private readonly bookingFile: string;
+  private readonly basketChangeFile: string;
+  private readonly snapshotDir: string;
   private readonly now: () => number;
   private readonly cooldownFile: string;
   private readonly minIntervalMs: number;
@@ -512,6 +597,8 @@ export class TescoIrelandProvider implements GroceryProvider {
     this.apiKey = options.apiKey ?? process.env.SUPERMARKET_TESCO_IE_API_KEY?.trim() ?? PUBLIC_API_KEY;
     this.sessionStore = options.sessionStore ?? TESCO_IE_SESSION;
     this.bookingFile = options.bookingFile ?? path.join(this.sessionStore.configDir, 'slot-booking.json');
+    this.basketChangeFile = options.basketChangeFile ?? path.join(this.sessionStore.configDir, 'basket-change.json');
+    this.snapshotDir = options.snapshotDir ?? path.join(this.sessionStore.configDir, 'basket-snapshots');
     this.cooldownFile = options.cooldownFile ?? path.join(this.sessionStore.configDir, 'cooldown.json');
     this.minIntervalMs = options.minIntervalMs ?? MIN_REQUEST_INTERVAL_MS;
     this.now = options.now ?? Date.now;
@@ -638,6 +725,7 @@ export class TescoIrelandProvider implements GroceryProvider {
   async logout(): Promise<void> {
     this.sessionStore.clearSession();
     fs.rmSync(this.bookingFile, { force: true });
+    fs.rmSync(this.basketChangeFile, { force: true });
   }
 
   async getBasket(): Promise<Basket> {
@@ -687,12 +775,115 @@ export class TescoIrelandProvider implements GroceryProvider {
     await this.updateBasketItem(itemId, 0);
   }
 
-  async clearBasket(): Promise<void> {
+  /**
+   * Step one of clearing: save a rollback snapshot of every line (mode 0600,
+   * under snapshotDir) and a single-use confirmation tied to the basket's
+   * contents. Nothing is changed.
+   */
+  async previewClearBasket(): Promise<BasketChangePreview> {
     const basket = await this.writableBasket();
-    if (basket.lines.length === 0) return;
-    const after = await this.updateLines(basket.lines.map((l) => ({ tpnc: l.tpnc, quantity: 0, unit: l.unit })));
+    if (basket.lines.length === 0) throw new RangeError(`the ${PROVIDER} basket is already empty; there is nothing to clear`);
+    const hash = basketHash(basket.id, basket.lines);
+    const takenAt = new Date(this.now()).toISOString();
+    const snapshot: BasketSnapshot = {
+      version: 1,
+      provider: 'tesco-ie',
+      basket_id: basket.id,
+      taken_at: takenAt,
+      hash,
+      lines: basket.lines.map((l) => ({
+        product_uid: l.productUid, tpnc: l.tpnc, name: l.name, quantity: l.quantity, unit: l.unit, cost: l.cost,
+      })),
+    };
+    fs.mkdirSync(this.snapshotDir, { recursive: true, mode: 0o700 });
+    const snapshotFile = path.join(this.snapshotDir, `${takenAt.replace(/[:.]/g, '-')}.json`);
+    // 'wx': never overwrite an earlier snapshot.
+    fs.writeFileSync(snapshotFile, JSON.stringify(snapshot, null, 2), { mode: 0o600, flag: 'wx' });
+    const summary = toBasket(basket);
+    return this.savePendingChange('clear', snapshotFile, hash, {
+      line_count: basket.lines.length,
+      item_count: summary.total_quantity,
+      total: summary.total_cost,
+    });
+  }
+
+  /**
+   * Step two: remove every line. Refused without the confirmation from a
+   * clear preview that has not expired, when the basket changed since (any
+   * line, quantity or unit), or when the rollback snapshot is gone. The
+   * confirmation is spent whatever happens next. Reads the basket back after.
+   */
+  async clearBasket(confirmation?: string): Promise<void> {
+    const pending = this.takePendingChange('clear', confirmation,
+      'clearing the basket needs a confirmation. Preview it first (`supermarket --provider tesco-ie clear`), ' +
+      'then pass the code it prints with --confirm');
+    const snapshot = this.loadSnapshot(pending.snapshot_file);
+    const basket = await this.writableBasket();
+    if (basketHash(basket.id, basket.lines) !== pending.basket_hash || snapshot.hash !== pending.basket_hash) {
+      throw new TescoIrelandConfirmationError('the basket changed since the preview. Preview the clear again', BASKET_UNCHANGED);
+    }
+    await this.updateLines(basket.lines.map((l) => ({ tpnc: l.tpnc, quantity: 0, unit: l.unit })));
+    const after = await this.readBasket();
     if (after.lines.length > 0) {
-      throw new ProviderProtocolError(PROVIDER, `the basket still has ${after.lines.length} lines after clearing`);
+      throw new ProviderProtocolError(PROVIDER,
+        `the basket still has ${after.lines.length} lines after clearing. Snapshot: ${pending.snapshot_file}`);
+    }
+  }
+
+  /**
+   * Step one of restoring: check the snapshot (a file path, or a name inside
+   * snapshotDir) and save a single-use confirmation tied to the snapshot and
+   * the current basket. Nothing is changed.
+   */
+  async previewRestoreBasket(snapshotRef: string): Promise<BasketChangePreview> {
+    const file = this.snapshotPath(snapshotRef);
+    const snapshot = this.loadSnapshot(file);
+    const basket = await this.writableBasket();
+    return this.savePendingChange('restore', file, basketHash(basket.id, basket.lines), {
+      line_count: snapshot.lines.length,
+      item_count: snapshot.lines.reduce((sum, l) => sum + l.quantity, 0),
+      total: sumKnown(snapshot.lines.map((l) => l.cost)),
+    });
+  }
+
+  /**
+   * Step two: add every snapshot line's quantity on top of what the basket
+   * holds now, in one UpdateBasket, then read the basket back. Refused like
+   * clearBasket. A line Tesco will not sell is undone and reported.
+   */
+  async restoreBasket(snapshotRef: string, confirmation: string): Promise<void> {
+    const file = this.snapshotPath(snapshotRef);
+    const pending = this.takePendingChange('restore', confirmation,
+      'restoring a snapshot needs a confirmation. Preview it first (`supermarket --provider tesco-ie restore <snapshot>`), ' +
+      'then pass the code it prints with --confirm');
+    if (pending.snapshot_file !== file) {
+      throw new TescoIrelandConfirmationError('that confirmation is for a different snapshot. Preview it again', BASKET_UNCHANGED);
+    }
+    const snapshot = this.loadSnapshot(file);
+    const basket = await this.writableBasket();
+    if (basketHash(basket.id, basket.lines) !== pending.basket_hash) {
+      throw new TescoIrelandConfirmationError('the basket changed since the preview. Preview the restore again', BASKET_UNCHANGED);
+    }
+    const targets = snapshot.lines.map((l) => {
+      const existing = basket.lines.find((b) => b.tpnc === l.tpnc);
+      const before = existing?.quantity ?? 0;
+      return { tpnc: l.tpnc, name: l.name, before, quantity: before + l.quantity, unit: existing?.unit ?? l.unit };
+    });
+    await this.updateLines(targets);
+    const after = await this.readBasket();
+    const notForSale = targets.filter((t) => after.lines.find((l) => l.tpnc === t.tpnc)?.forSale === false);
+    const short = targets.filter((t) => !notForSale.includes(t) &&
+      (after.lines.find((l) => l.tpnc === t.tpnc)?.quantity ?? 0) !== t.quantity);
+    if (notForSale.length > 0) {
+      // Tesco accepts a line it will not sell and drops it at checkout. Undo those.
+      await this.updateLines(notForSale.map((t) => ({ tpnc: t.tpnc, quantity: t.before, unit: t.unit })));
+    }
+    if (notForSale.length > 0 || short.length > 0) {
+      const parts = [
+        ...(notForSale.length > 0 ? [`not for sale to this account, so undone: ${notForSale.map((t) => t.name).join(', ')}`] : []),
+        ...(short.length > 0 ? [`not at the expected quantity after restoring: ${short.map((t) => t.name).join(', ')}`] : []),
+      ];
+      throw new ProviderProtocolError(PROVIDER, `restore finished with problems — ${parts.join('; ')}`);
     }
   }
 
@@ -878,6 +1069,63 @@ export class TescoIrelandProvider implements GroceryProvider {
     }
     if (!slot.available) throw new RangeError(`the ${slot.date} ${slot.start_time}-${slot.end_time} slot is no longer available`);
     return slot;
+  }
+
+  /** A bare snapshot name is looked up in snapshotDir; a path is used as given. */
+  private snapshotPath(ref: string): string {
+    const trimmed = ref.trim();
+    if (!trimmed) throw new RangeError('name a basket snapshot to restore');
+    return path.resolve(trimmed.includes('/') || trimmed.includes(path.sep) ? trimmed : path.join(this.snapshotDir, trimmed));
+  }
+
+  private loadSnapshot(file: string): BasketSnapshot {
+    let text: string;
+    try {
+      text = fs.readFileSync(file, 'utf8');
+    } catch {
+      throw new RangeError(`the basket snapshot ${file} cannot be read`);
+    }
+    return parseSnapshot(file, text);
+  }
+
+  private savePendingChange(
+    action: PendingBasketChange['action'],
+    snapshotFile: string,
+    basketHashValue: string,
+    counts: Pick<BasketChangePreview, 'line_count' | 'item_count' | 'total'>
+  ): BasketChangePreview {
+    const confirmation = randomBytes(4).toString('hex');
+    const expiresAt = new Date(this.now() + CONFIRMATION_TTL_MS).toISOString();
+    const pending: PendingBasketChange = {
+      action, confirmation, snapshot_file: snapshotFile, basket_hash: basketHashValue, expires_at: expiresAt,
+    };
+    fs.mkdirSync(path.dirname(this.basketChangeFile), { recursive: true });
+    fs.writeFileSync(this.basketChangeFile, JSON.stringify(pending), { mode: 0o600 });
+    return { action, confirmation, expires_at: expiresAt, ...counts, currency: CURRENCY, snapshot_file: snapshotFile };
+  }
+
+  /** Read, delete and check the pending clear/restore, so a confirmation is single-use. */
+  private takePendingChange(action: PendingBasketChange['action'], confirmation: string | undefined, missing: string): PendingBasketChange {
+    if (!confirmation) throw new TescoIrelandConfirmationError(missing, BASKET_UNCHANGED);
+    let raw: Record<string, unknown> = {};
+    try {
+      const text = fs.readFileSync(this.basketChangeFile, 'utf8');
+      fs.rmSync(this.basketChangeFile, { force: true });
+      raw = asRecord(JSON.parse(text));
+    } catch {
+      // Missing or corrupt: treated as no pending preview below.
+    }
+    const code = firstString(raw.confirmation);
+    const snapshotFile = firstString(raw.snapshot_file);
+    const hash = firstString(raw.basket_hash);
+    const expiresAt = firstString(raw.expires_at);
+    if (raw.action !== action || !code || !snapshotFile || !hash || !expiresAt || !sameCode(code, confirmation)) {
+      throw new TescoIrelandConfirmationError(`that confirmation does not match a pending ${action} preview. Preview it again`, BASKET_UNCHANGED);
+    }
+    if (Date.parse(expiresAt) <= this.now()) {
+      throw new TescoIrelandConfirmationError(`the confirmation expired at ${expiresAt}. Preview the ${action} again`, BASKET_UNCHANGED);
+    }
+    return { action, confirmation: code, snapshot_file: snapshotFile, basket_hash: hash, expires_at: expiresAt };
   }
 
   /** Read and delete the pending booking, so a confirmation is single-use. */

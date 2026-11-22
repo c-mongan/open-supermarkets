@@ -122,14 +122,14 @@ A useful first prompt:
 
 > *Plan a week of high-protein dinners, no pork and no nuts. Price the shop at Tesco, show me the basket and do not place an order.*
 
-The server exposes 22 tools, including batch primitives designed to stop agents burning
+The server exposes 23 tools, including batch primitives designed to stop agents burning
 one tool call per ingredient:
 
 | MCP tool | Purpose |
 |---|---|
 | `grocery_search` · `grocery_compare` | Find and compare products |
 | **`grocery_search_batch`** · **`grocery_basket_add_batch`** | **Many at once — prefer these** |
-| `grocery_basket_*` | View, add, remove, update, clear |
+| `grocery_basket_*` | View, add, remove, update, clear, restore (two-step clear/restore on tesco-ie) |
 | `grocery_slots` · `grocery_book_slot` | Delivery slots |
 | `grocery_checkout` | Preview/place an order; `dry_run` defaults to **true** |
 | `grocery_favourites` · `ocado_regulars` · `tesco_staples` | Repeat-purchase lists |
@@ -188,9 +188,9 @@ not substituted for the regular shelf price. Product availability uses three sta
 the retailer provided no reliable stock signal. Batch search exposes the same states as `inStock`.
 Tesco Ireland search is anonymous: Clubcard Prices never replace the regular price, and stock stays `null`.
 Its basket, delivery slots and order history need a browser session imported with
-`supermarket --provider tesco-ie import-session --stdin`. Booking a slot takes two steps (a preview
-that prints a single-use confirmation code, then `book <slot-id> --confirm <code>`), and payment
-stays on tesco.ie.
+`supermarket --provider tesco-ie import-session --stdin`. Booking a slot and clearing the basket each
+take two steps (a preview that prints a single-use confirmation code, then `--confirm <code>`); a clear
+preview first saves a rollback snapshot that `restore <snapshot>` re-adds. Payment stays on tesco.ie.
 
 Ocado slot booking and checkout are blocked by AWS WAF. Reading slots works; committing
 to one does not. The manifest therefore does not claim those capabilities.

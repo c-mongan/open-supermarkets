@@ -199,7 +199,7 @@ test('writes to a basket that is an order in amend are refused before any mutati
     (p) => p.addToBasket('9003000', 1),
     (p) => p.removeFromBasket('9001000'),
     (p) => p.updateBasketItem('9001000', 3),
-    (p) => p.clearBasket(),
+    (p) => p.previewClearBasket(),
     (p) => p.previewSlotBooking('ZmFrZS1zbG90LTE='),
   ]) {
     const { provider, calls } = setup([copy('basketAmend')]);
@@ -469,7 +469,10 @@ test('no provider path requests a www.tesco.ie page: only xapi (and the search i
       copy('basket'), copy('productByTpnb'), updated(afterAdd, [{ id: '9003001', successful: true }]),
       copy('basket'), updated(afterRemove, [{ id: '9002001', successful: true }]),
       copy('basket'), updated(afterUpdate, [{ id: '9001001', successful: true }]),
-      copy('basket'), updated(cleared, [{ id: '9001001', successful: true }, { id: '9002001', successful: true }]),
+      copy('basket'),
+      copy('basket'), updated(cleared, [{ id: '9001001', successful: true }, { id: '9002001', successful: true }]), cleared,
+      cleared,
+      cleared, updated(copy('basket'), [{ id: '9001001', successful: true }, { id: '9002001', successful: true }]), copy('basket'),
       copy('slots'),
       copy('basket'), copy('slots'),
       copy('basket'), copy('slots'), copy('fulfilment'),
@@ -482,14 +485,17 @@ test('no provider path requests a www.tesco.ie page: only xapi (and the search i
     await provider.addToBasket('9003000', 1);
     await provider.removeFromBasket('9002000');
     await provider.updateBasketItem('9001000', 4);
-    await provider.clearBasket();
+    const clear = await provider.previewClearBasket();
+    await provider.clearBasket(clear.confirmation);
+    const restore = await provider.previewRestoreBasket(clear.snapshot_file);
+    await provider.restoreBasket(clear.snapshot_file, restore.confirmation);
     await provider.getDeliverySlots();
     const { confirmation } = await provider.previewSlotBooking('ZmFrZS1zbG90LTE=');
     await provider.bookSlot('ZmFrZS1zbG90LTE=', confirmation);
     await provider.getOrders();
     await provider.isAuthenticated();
 
-    assert.equal(calls.length, 22, 'every queued response was used: no extra or missing request');
+    assert.equal(calls.length, 28, 'every queued response was used: no extra or missing request');
     const hosts = new Set(calls.map((c) => new URL(c.url).hostname));
     assert.deepEqual([...hosts].sort(), ['search.api.tesco.com', 'xapi.tesco.com']);
     for (const call of calls) {
@@ -507,3 +513,152 @@ function fixturesFor(name) {
   const file = { projection: 'projection-error', index: 'index-search', hydration: 'hydration' }[name];
   return JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', `tesco-ie-${file}.json`), 'utf8'));
 }
+
+// ── two-step clear and restore ───────────────────────────────────────
+
+const ALL_LINES_OK = [{ id: '9001001', successful: true }, { id: '9002001', successful: true }];
+
+function emptied() {
+  const env = copy('basket');
+  env[0].data.basket.items = [];
+  return env;
+}
+
+test('clear preview reads the basket, writes a 0600 rollback snapshot, and changes nothing', async () => {
+  const { provider, calls, home } = setup([copy('basket')]);
+  const preview = await provider.previewClearBasket();
+
+  assert.deepEqual(calls.map((c) => c.ops[0].operationName), ['GetBasket'], 'no write');
+  assert.equal(preview.action, 'clear');
+  assert.equal(preview.line_count, 2);
+  assert.equal(preview.item_count, 3);
+  assert.equal(preview.total, 10.65);
+  assert.equal(preview.currency, 'EUR');
+  assert.match(preview.confirmation, /^[0-9a-f]{8}$/);
+  assert.equal(preview.expires_at, new Date(NOW + 5 * 60 * 1000).toISOString());
+
+  const dir = path.join(home, '.tesco-ie', 'basket-snapshots');
+  assert.equal(path.dirname(preview.snapshot_file), dir);
+  assert.equal(path.basename(preview.snapshot_file), '2026-11-24T09-00-00-000Z.json');
+  assert.equal(fs.statSync(preview.snapshot_file).mode & 0o777, 0o600, 'snapshot is owner-only');
+  assert.equal(fs.statSync(dir).mode & 0o077, 0, 'snapshot folder is owner-only');
+  const snapshot = JSON.parse(fs.readFileSync(preview.snapshot_file, 'utf8'));
+  assert.equal(snapshot.basket_id, 'trn:tesco:order:v3:r2:fake-basket');
+  assert.deepEqual(snapshot.lines.map((l) => [l.product_uid, l.tpnc, l.quantity]), [['9001000', '9001001', 2], ['9002000', '9002001', 1]]);
+  assert.match(snapshot.hash, /^[0-9a-f]{64}$/);
+  assert.equal(fs.statSync(path.join(home, '.tesco-ie', 'basket-change.json')).mode & 0o777, 0o600);
+});
+
+test('clear of an empty basket previews nothing and saves no snapshot', async () => {
+  const { provider, home } = setup([emptied()]);
+  await assert.rejects(provider.previewClearBasket(), /already empty/);
+  assert.equal(fs.existsSync(path.join(home, '.tesco-ie', 'basket-snapshots')), false);
+});
+
+test('clear without a confirmation sends nothing', async () => {
+  const { provider, calls } = setup([]);
+  await assert.rejects(provider.clearBasket(), (error) => {
+    assert.ok(error instanceof TescoIrelandConfirmationError);
+    assert.match(error.message, /needs a confirmation.*The basket was not changed/);
+    return true;
+  });
+  assert.equal(calls.length, 0);
+});
+
+test('clear confirm removes every line in one UpdateBasket, then reads the basket back', async () => {
+  const { provider, calls } = setup([copy('basket'), copy('basket'), updated(emptied(), ALL_LINES_OK), emptied()]);
+  const { confirmation } = await provider.previewClearBasket();
+  await provider.clearBasket(confirmation);
+
+  assert.deepEqual(calls.map((c) => c.ops[0].operationName), ['GetBasket', 'GetBasket', 'UpdateBasket', 'GetBasket']);
+  assert.deepEqual(calls[2].ops[0].variables.items.map((i) => [i.id, i.newValue]), [['9001001', 0], ['9002001', 0]]);
+  await assert.rejects(provider.clearBasket(confirmation), /does not match a pending clear preview/, 'the code is single-use');
+});
+
+test('clear refuses a stale code, a wrong code and a spent code before any write', async () => {
+  let clock = NOW;
+  const { provider, calls } = setup([copy('basket'), copy('basket')], { now: () => clock });
+  const first = await provider.previewClearBasket();
+  clock += 5 * 60 * 1000;
+  await assert.rejects(provider.clearBasket(first.confirmation), /confirmation expired at .*The basket was not changed/);
+
+  clock = NOW + 1;
+  const second = await provider.previewClearBasket();
+  await assert.rejects(provider.clearBasket(second.confirmation === '00000000' ? '11111111' : '00000000'), /does not match/);
+  await assert.rejects(provider.clearBasket(second.confirmation), /does not match/, 'a refused attempt spends the code');
+  assert.deepEqual(calls.map((c) => c.ops[0].operationName), ['GetBasket', 'GetBasket'], 'only the previews read');
+});
+
+test('clear refuses when the basket changed since the preview', async () => {
+  const changed = copy('basket');
+  changed[0].data.basket.items[0].quantity = 3;
+  const { provider, calls } = setup([copy('basket'), changed]);
+  const { confirmation } = await provider.previewClearBasket();
+  await assert.rejects(provider.clearBasket(confirmation), (error) => {
+    assert.ok(error instanceof TescoIrelandConfirmationError);
+    assert.match(error.message, /basket changed since the preview/);
+    return true;
+  });
+  assert.deepEqual(calls.map((c) => c.ops[0].operationName), ['GetBasket', 'GetBasket'], 'no UpdateBasket');
+});
+
+test('clear refuses when the rollback snapshot is gone', async () => {
+  const { provider, calls } = setup([copy('basket')]);
+  const { confirmation, snapshot_file } = await provider.previewClearBasket();
+  fs.rmSync(snapshot_file);
+  await assert.rejects(provider.clearBasket(confirmation), /cannot be read/);
+  assert.equal(calls.length, 1);
+});
+
+test('restore re-adds snapshot lines on top of the basket after preview + confirm', async () => {
+  const { provider, calls } = setup([
+    copy('basket'), copy('basket'), updated(emptied(), ALL_LINES_OK), emptied(),
+    emptied(),
+    emptied(), updated(copy('basket'), ALL_LINES_OK), copy('basket'),
+  ]);
+  const clear = await provider.previewClearBasket();
+  await provider.clearBasket(clear.confirmation);
+
+  const name = path.basename(clear.snapshot_file);
+  const preview = await provider.previewRestoreBasket(name);
+  assert.equal(preview.action, 'restore');
+  assert.equal(preview.snapshot_file, clear.snapshot_file, 'a bare name resolves inside the snapshot folder');
+  assert.equal(preview.line_count, 2);
+  assert.equal(preview.item_count, 3);
+  assert.equal(preview.total, 10.65);
+  assert.equal(calls.length, 5, 'the restore preview only reads');
+
+  await provider.restoreBasket(name, preview.confirmation);
+  assert.deepEqual(calls.slice(5).map((c) => c.ops[0].operationName), ['GetBasket', 'UpdateBasket', 'GetBasket']);
+  assert.deepEqual(calls[6].ops[0].variables.items.map((i) => [i.id, i.newValue]), [['9001001', 2], ['9002001', 1]]);
+});
+
+test('restore adds to lines already in the basket', async () => {
+  const { provider, calls } = setup([copy('basket'), copy('basket'), copy('basket'), updated(copy('basket'), ALL_LINES_OK), copy('basket')]);
+  const { snapshot_file } = await provider.previewClearBasket();
+  const { confirmation } = await provider.previewRestoreBasket(snapshot_file);
+  // The fake read-back shows the old quantities, so restore reports the shortfall.
+  await assert.rejects(provider.restoreBasket(snapshot_file, confirmation), /not at the expected quantity/);
+  assert.deepEqual(calls[3].ops[0].variables.items.map((i) => [i.id, i.newValue]), [['9001001', 4], ['9002001', 2]]);
+});
+
+test('restore refuses a changed basket, another snapshot and a tampered snapshot', async () => {
+  const changed = copy('basket');
+  changed[0].data.basket.items.pop();
+  const { provider, calls, home } = setup([copy('basket'), emptied(), changed, emptied()]);
+  const { snapshot_file } = await provider.previewClearBasket();
+
+  const first = await provider.previewRestoreBasket(snapshot_file);
+  await assert.rejects(provider.restoreBasket(snapshot_file, first.confirmation), /basket changed since the preview/);
+
+  const second = await provider.previewRestoreBasket(snapshot_file);
+  const other = path.join(home, 'other.json');
+  fs.copyFileSync(snapshot_file, other);
+  await assert.rejects(provider.restoreBasket(other, second.confirmation), /different snapshot/);
+
+  const tampered = JSON.parse(fs.readFileSync(snapshot_file, 'utf8'));
+  tampered.lines[0].quantity = 20;
+  fs.writeFileSync(snapshot_file, JSON.stringify(tampered));
+  await assert.rejects(provider.previewRestoreBasket(snapshot_file), /do not match its hash/);
+  assert.ok(!calls.some((c) => c.ops[0].operationName === 'UpdateBasket'), 'nothing was written');
+});
